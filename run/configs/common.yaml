@@ -16,7 +16,7 @@ trainer:
       dir: null
       id: null
       anonymous: null
-      project: <<[repository_name]>>
+      project: aorta
       log_model: false
       experiment: null
       prefix: ''
