@@ -1,15 +1,40 @@
 import logging
 import torch
+import segmentation_models_pytorch_3d as smp
+from contextlib import ExitStack
+from copy import deepcopy
+from typing import Literal
 from lightning import LightningModule
-from typing import Any, Dict, Optional, Union
+from monai.metrics import DiceMetric, SurfaceDiceMetric, CumulativeIterationMetric
+from typing import Any, Dict, Optional, Union, Type
 from torch import Tensor
 from lightning.pytorch.cli import instantiate_class
 from lightning.pytorch.utilities import grad_norm
+from unittest.mock import patch
 
 from src.utils.utils import state_norm
+from src.utils.convert_2d_to_3d import TimmUniversalEncoder3d, ConvNeXtBlock_forward_3d
 
 
 logger = logging.getLogger(__name__)
+
+
+class MonaiMetricWrapper:
+    def __init__(self, metric_class: Type[CumulativeIterationMetric], **kwargs):
+        self.metric = metric_class(**kwargs)
+        self.metric_values = []
+
+    def reset(self):
+        self.metric_values = []
+
+    def update(self, preds, targets):
+        preds, targets = preds.detach().cpu().numpy(), targets.detach().cpu().numpy()
+        self.metric_values.append(self.metric(y_pred=preds, y=targets).mean())
+
+    def compute(self):
+        if len(self.metric_values) == 0:
+            return None
+        return sum(self.metric_values) / len(self.metric_values)
 
 
 class BaseModule(LightningModule):
@@ -28,8 +53,6 @@ class BaseModule(LightningModule):
         self.save_hyperparameters()
 
         self.metrics = None
-        self.cat_metrics = None
-
         self.configure_metrics()
 
     def compute_loss_preds(self, batch, *args, **kwargs):
@@ -37,12 +60,6 @@ class BaseModule(LightningModule):
 
     def configure_metrics(self):
         """Configure task-specific metrics."""
-
-    @staticmethod
-    def check_batch_dims(batch):
-        assert all(map(lambda x: len(x) == len(batch[0]), batch)), \
-            f'All entities in batch must have the same length, got ' \
-            f'{list(map(len, batch))}'
 
     def remove_nans(self, y, y_pred):
         nan_mask = torch.isnan(y_pred)
@@ -68,16 +85,16 @@ class BaseModule(LightningModule):
         """Extract preds and targets from batch.
         Could be overriden for custom batch / prediction structure.
         """
-        y, y_pred = batch[1].detach(), preds[:, 1].detach().float()
-        y, y_pred = self.remove_nans(y, y_pred)
-        y_pred = torch.softmax(y_pred, dim=1)
+        y, y_pred = batch['mask'].detach(), preds.detach()
         return y, y_pred
 
-    def update_metrics(self, span, preds, batch):
+    def update_metrics(self, prefix, preds, batch):
         """Update train metrics."""
+        if self.metrics is None:
+            return
         y, y_proba = self.extract_targets_and_probas_for_metric(preds, batch)
-        self.cat_metrics[span]['probas'].update(y_proba)
-        self.cat_metrics[span]['targets'].update(y)
+        for metric in self.metrics[prefix].values():
+            metric.update(y_proba, y)
 
     def on_train_epoch_start(self) -> None:
         """Called in the training loop at the very beginning of the epoch."""
@@ -86,11 +103,6 @@ class BaseModule(LightningModule):
             # TODO change to >= somehow
             if self.current_epoch == self.hparams.finetuning['unfreeze_before_epoch']:
                 self.unfreeze()
-
-    def on_train_start(self) -> None:
-        # Change dataloader num_workers to 10
-        # after cache is filled
-        self.trainer.datamodule.hparams.num_workers = self.trainer.datamodule.hparams.num_workers_saturated
 
     def unfreeze_only_selected(self):
         """
@@ -124,9 +136,9 @@ class BaseModule(LightningModule):
                 on_step=True,
                 on_epoch=True,
                 prog_bar=True,
-                batch_size=batch[0].shape[0],
+                batch_size=batch['image'].shape[0],
             )
-        self.update_metrics('train_metrics', preds, batch)
+        self.update_metrics('train', preds, batch)
 
         # Handle nan in loss
         has_nan = False
@@ -159,9 +171,9 @@ class BaseModule(LightningModule):
                 on_epoch=True,
                 prog_bar=True,
                 add_dataloader_idx=False,
-                batch_size=batch[0].shape[0],
+                batch_size=batch['image'].shape[0],
             )
-        self.update_metrics('val_metrics', preds, batch)
+        self.update_metrics('val', preds, batch)
         return total_loss
 
     def predict_step(self, batch: Tensor, batch_idx: int, dataloader_idx: Optional[int] = None, **kwargs) -> Tensor:
@@ -176,27 +188,11 @@ class BaseModule(LightningModule):
         prog_bar_names=None,
         reset=True,
     ):
-        # Get metric span: train or val
-        span = None
-        if prefix == 'train':
-            span = 'train_metrics'
-        elif prefix in ['val', 'val_ds']:
-            span = 'val_metrics'
-        
-        # Get concatenated preds and targets
-        # and reset them
-        probas, targets = \
-            self.cat_metrics[span]['probas'].compute().cpu(),  \
-            self.cat_metrics[span]['targets'].compute().cpu()
-        if reset:
-            self.cat_metrics[span]['probas'].reset()
-            self.cat_metrics[span]['targets'].reset()
-
         # Calculate and log metrics
-        for name, metric in self.metrics.items():
-            metric.update(probas[:, 1], targets)
+        for name, metric in self.metrics[prefix].items():
             metric_value = metric.compute()
-            metric.reset()
+            if reset:
+                metric.reset()
             
             prog_bar = False
             if prog_bar_names is not None:
@@ -215,7 +211,6 @@ class BaseModule(LightningModule):
         """Called in the training loop at the very end of the epoch."""
         if self.metrics is None:
             return
-        assert self.cat_metrics is not None
 
         self.log_metrics_and_reset(
             'train',
@@ -229,7 +224,6 @@ class BaseModule(LightningModule):
         """Called in the validation loop at the very end of the epoch."""
         if self.metrics is None:
             return
-        assert self.cat_metrics is not None
 
         self.log_metrics_and_reset(
             'val',
@@ -237,13 +231,6 @@ class BaseModule(LightningModule):
             on_epoch=True,
             prog_bar_names=self.hparams.prog_bar_names,
             reset=False,
-        )
-        self.log_metrics_and_reset(
-            'val_ds',
-            on_step=False,
-            on_epoch=True,
-            prog_bar_names=self.hparams.prog_bar_names,
-            reset=True,
         )
 
     def get_lr_decayed(self, lr, layer_index, layer_name):
@@ -341,3 +328,68 @@ class BaseModule(LightningModule):
         else:
             if 'state_2.0_norm_total' in norms:
                 self.log('state_2.0_norm_total', norms['state_2.0_norm_total'])
+
+
+
+def encoder_name_to_patch_context_args(encoder_name):
+    if 'convnext' in encoder_name:
+        return [
+            ('segmentation_models_pytorch_3d.encoders.TimmUniversalEncoder', TimmUniversalEncoder3d),
+            ('timm.models.convnext.ConvNeXtBlock.forward', ConvNeXtBlock_forward_3d),
+        ]
+    else:
+        raise ValueError(f'Unknown encoder_name {encoder_name}.')
+
+
+class AortaModule(BaseModule):
+    def __init__(
+        self,
+        seg_arch: Literal['smp.Unet'],
+        seg_kwargs: Dict[str, Any],
+        **base_kwargs,
+    ):
+        super().__init__(**base_kwargs)
+        self.save_hyperparameters()
+
+        # Select segmentation model class
+        seg_arch_to_class = {
+            'smp.Unet': smp.Unet,
+        }
+        seg_class = seg_arch_to_class[seg_arch]
+
+        # Wrap segmentation model creation with context managers
+        # to patch the model for 3D. CMs depend on the encoder_name
+        encoder_name = seg_kwargs['encoder_name']
+        context_args = encoder_name_to_patch_context_args(encoder_name)
+        with ExitStack() as stack:
+            _ = [stack.enter_context(patch(*args)) for args in context_args]
+            self.model = seg_class(**seg_kwargs)
+
+    def compute_loss_preds(self, batch, *args, **kwargs):
+        """Compute losses and predictions."""
+        image = batch['image']  # (B, 1, H, W, D)
+        logits = self.model(image)  # (B, classes, H, W, D)
+        probas = torch.softmax(logits, dim=1)
+
+        if 'mask' not in batch:
+            return None, None, probas
+        
+        mask = batch['mask']  # (B, H, W, D)
+        loss = torch.nn.functional.cross_entropy(
+            logits,
+            mask.long(),
+            reduction='none',
+        ).mean()  # TODO: fix non-deterministic behavior if reduction is applied
+
+        return loss, {'ce': loss}, probas
+
+    # def configure_metrics(self):
+    #     """Configure task-specific metrics."""
+    #     class_thresholds = [0.5] * (24 - 1) # Excluding background
+    #     metrics = {
+    #         'dice': MonaiMetricWrapper(DiceMetric, include_background=False, reduction="mean", get_not_nans=False),
+    #         'nsd': MonaiMetricWrapper(SurfaceDiceMetric, include_background=False, class_thresholds=class_thresholds),
+    #     }
+    #     self.metrics = {
+    #         'val_metrics': deepcopy(metrics),
+    #     }
