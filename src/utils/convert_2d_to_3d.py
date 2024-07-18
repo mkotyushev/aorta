@@ -315,6 +315,7 @@ def repeat_last_size(size, ndim):
         return size
     return (*size, *(size[-1] for _ in range(ndim - len(size))))
 
+
 def convert_2d_to_3d(layer):
     for child_layer_name, child_layer in layer.named_children():
         new_child_layer = None
@@ -366,8 +367,6 @@ def convert_2d_to_3d(layer):
                 input_fmt=input_fmt,
             )
         else:
-            if isinstance(child_layer, ConvNeXtBlock):
-                setattr(child_layer, 'forward', types.MethodType(ConvNeXtBlock_forward_3d, child_layer))
             convert_2d_to_3d(child_layer)
 
         if new_child_layer is not None:
