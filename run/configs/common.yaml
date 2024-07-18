@@ -133,6 +133,9 @@ model:
     log_norm_verbose: null
     lr_layer_decay: 1.0
     skip_nan: false
+    prog_bar_names:
+     - dice
+     - nsd
 data:
   class_path: src.data.datamodule.AortaDataModule
   init_args:

@@ -28,13 +28,15 @@ class MonaiMetricWrapper:
         self.metric_values = []
 
     def update(self, preds, targets):
-        preds, targets = preds.detach().cpu().numpy(), targets.detach().cpu().numpy()
+        # one-hot encoding:
+        # targets: (B, H, W, D) -> (B, classes, H, W, D)
+        targets = torch.nn.functional.one_hot(targets.long(), num_classes=preds.shape[1]).permute(0, 4, 1, 2, 3)
         self.metric_values.append(self.metric(y_pred=preds, y=targets).mean())
 
     def compute(self):
         if len(self.metric_values) == 0:
             return None
-        return sum(self.metric_values) / len(self.metric_values)
+        return (sum(self.metric_values) / len(self.metric_values)).item()
 
 
 class BaseModule(LightningModule):
@@ -90,7 +92,7 @@ class BaseModule(LightningModule):
 
     def update_metrics(self, prefix, preds, batch):
         """Update train metrics."""
-        if self.metrics is None:
+        if self.metrics is None or prefix not in self.metrics:
             return
         y, y_proba = self.extract_targets_and_probas_for_metric(preds, batch)
         for metric in self.metrics[prefix].values():
@@ -230,7 +232,7 @@ class BaseModule(LightningModule):
             on_step=False,
             on_epoch=True,
             prog_bar_names=self.hparams.prog_bar_names,
-            reset=False,
+            reset=True,
         )
 
     def get_lr_decayed(self, lr, layer_index, layer_name):
@@ -383,13 +385,13 @@ class AortaModule(BaseModule):
 
         return loss, {'ce': loss}, probas
 
-    # def configure_metrics(self):
-    #     """Configure task-specific metrics."""
-    #     class_thresholds = [0.5] * (24 - 1) # Excluding background
-    #     metrics = {
-    #         'dice': MonaiMetricWrapper(DiceMetric, include_background=False, reduction="mean", get_not_nans=False),
-    #         'nsd': MonaiMetricWrapper(SurfaceDiceMetric, include_background=False, class_thresholds=class_thresholds),
-    #     }
-    #     self.metrics = {
-    #         'val_metrics': deepcopy(metrics),
-    #     }
+    def configure_metrics(self):
+        """Configure task-specific metrics."""
+        class_thresholds = [0.5] * (24 - 1) # Excluding background
+        metrics = {
+            'dice': MonaiMetricWrapper(DiceMetric, include_background=False, reduction="mean", get_not_nans=False),
+            'nsd': MonaiMetricWrapper(SurfaceDiceMetric, include_background=False, class_thresholds=class_thresholds),
+        }
+        self.metrics = {
+            'val': deepcopy(metrics),
+        }
