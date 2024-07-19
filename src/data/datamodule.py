@@ -42,7 +42,6 @@ class AortaDataModule(LightningDataModule):
         )
         self.val_transform = self.test_transform = Compose(
             [
-                CenterCrop(image_size),
                 NormalizeHu(sub=MIN_HU, div=MAX_HU-MIN_HU, clip=True),
             ],
             p=1.0,
@@ -60,12 +59,14 @@ class AortaDataModule(LightningDataModule):
                 data_dirpath=self.hparams.data_dirpath,
                 names=SPLIT_TO_NAMES['valid'],
                 transform=self.val_transform,
+                patch_size=(self.hparams.image_size, self.hparams.image_size, self.hparams.image_size),
             )
         elif stage == 'test' and self.test_dataset is None:
             self.test_dataset = AortaDataset(
                 data_dirpath=self.hparams.data_dirpath,
                 names=SPLIT_TO_NAMES['test'],
                 transform=self.test_transform,
+                patch_size=(self.hparams.image_size, self.hparams.image_size, self.hparams.image_size),
             )
         
     def train_dataloader(self) -> DataLoader:   

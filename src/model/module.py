@@ -22,21 +22,18 @@ logger = logging.getLogger(__name__)
 class MonaiMetricWrapper:
     def __init__(self, metric_class: Type[CumulativeIterationMetric], **kwargs):
         self.metric = metric_class(**kwargs)
-        self.metric_values = []
 
     def reset(self):
-        self.metric_values = []
+        self.metric.reset()
 
     def update(self, preds, targets):
         # one-hot encoding:
         # targets: (B, H, W, D) -> (B, classes, H, W, D)
         targets = torch.nn.functional.one_hot(targets.long(), num_classes=preds.shape[1]).permute(0, 4, 1, 2, 3)
-        self.metric_values.append(self.metric(y_pred=preds, y=targets).mean())
+        self.metric(y_pred=preds, y=targets)
 
     def compute(self):
-        if len(self.metric_values) == 0:
-            return None
-        return (sum(self.metric_values) / len(self.metric_values)).item()
+        return self.metric.aggregate().item()
 
 
 class BaseModule(LightningModule):
@@ -87,7 +84,7 @@ class BaseModule(LightningModule):
         """Extract preds and targets from batch.
         Could be overriden for custom batch / prediction structure.
         """
-        y, y_pred = batch['mask'].detach(), preds.detach()
+        y, y_pred = batch['mask'].detach().cpu(), preds.detach().cpu().bfloat16()
         return y, y_pred
 
     def update_metrics(self, prefix, preds, batch):
