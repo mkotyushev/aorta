@@ -80,7 +80,7 @@ trainer:
   enable_checkpointing: true
   enable_progress_bar: null
   enable_model_summary: null
-  accumulate_grad_batches: 1
+  accumulate_grad_batches: 8
   gradient_clip_val: 20
   gradient_clip_algorithm: norm
   deterministic: true
@@ -100,7 +100,7 @@ model:
   init_args:
     seg_arch: smp.Unet
     seg_kwargs:
-      encoder_name: tu-convnextv2_nano.fcmae_ft_in22k_in1k_384
+      encoder_name: tu-convnextv2_base.fcmae_ft_in22k_in1k_384
       in_channels: 1
       classes: 24
       encoder_depth: 4
