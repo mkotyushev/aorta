@@ -1,6 +1,6 @@
 from lightning.pytorch import LightningDataModule
 from pathlib import Path
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from volumentations import Compose, CenterCrop
 
 from src.data.dataset import AortaDataset
@@ -69,7 +69,14 @@ class AortaDataModule(LightningDataModule):
                 patch_size=(self.hparams.image_size, self.hparams.image_size, self.hparams.image_size),
             )
         
-    def train_dataloader(self) -> DataLoader:   
+    def train_dataloader(self) -> DataLoader:
+        sampler = RandomSampler(
+            data_source=self.train_dataset,
+            replacement=True,
+            num_samples=self.train_dataset.n_samples(
+                (self.hparams.image_size, self.hparams.image_size, self.hparams.image_size)
+            ),
+        )
         return DataLoader(
             dataset=self.train_dataset, 
             batch_size=self.hparams.batch_size, 
@@ -77,8 +84,8 @@ class AortaDataModule(LightningDataModule):
             pin_memory=self.hparams.pin_memory, 
             prefetch_factor=self.hparams.prefetch_factor,
             persistent_workers=self.hparams.persistent_workers,
-            sampler=None,
-            shuffle=True,
+            sampler=sampler,
+            shuffle=False,
             drop_last=True,
             collate_fn=AortaDataset.collate_fn,
         )
