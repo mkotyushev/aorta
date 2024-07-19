@@ -367,6 +367,9 @@ def convert_2d_to_3d(layer):
                 input_fmt=input_fmt,
             )
         else:
+            # TODO: move to context manager
+            if isinstance(child_layer, ConvNeXtBlock):
+                setattr(child_layer, 'forward', types.MethodType(ConvNeXtBlock_forward_3d, child_layer))
             convert_2d_to_3d(child_layer)
 
         if new_child_layer is not None:

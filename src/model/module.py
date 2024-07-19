@@ -339,7 +339,7 @@ def encoder_name_to_patch_context_args(encoder_name):
     if 'convnext' in encoder_name:
         return [
             ('segmentation_models_pytorch_3d.encoders.TimmUniversalEncoder', TimmUniversalEncoder3d),
-            ('timm.models.convnext.ConvNeXtBlock.forward', ConvNeXtBlock_forward_3d),
+            # ('timm.models.convnext.ConvNeXtBlock.forward', ConvNeXtBlock_forward_3d),
         ]
     else:
         raise ValueError(f'Unknown encoder_name {encoder_name}.')
