@@ -190,6 +190,8 @@ class BaseModule(LightningModule):
         prog_bar_names=None,
         reset=True,
     ):
+        if self.metrics is None or prefix not in self.metrics:
+            return
         # Calculate and log metrics
         for name, metric in self.metrics[prefix].items():
             metric_value = metric.compute()
