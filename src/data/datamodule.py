@@ -1,7 +1,7 @@
 from lightning.pytorch import LightningDataModule
 from pathlib import Path
 from torch.utils.data import DataLoader, RandomSampler
-from volumentations import Compose, CenterCrop
+from volumentations import Compose, RandomCrop
 
 from src.data.dataset import AortaDataset
 from src.data.transforms import NormalizeHu
@@ -35,7 +35,7 @@ class AortaDataModule(LightningDataModule):
         image_size = (self.hparams.image_size, self.hparams.image_size, self.hparams.image_size)
         self.train_transform = Compose(
             [
-                CenterCrop(image_size),
+                RandomCrop(image_size),
                 NormalizeHu(sub=MIN_HU, div=MAX_HU-MIN_HU, clip=True),
             ],
             p=1.0,
