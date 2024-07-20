@@ -384,13 +384,14 @@ class AortaModule(BaseModule):
 
         return loss, {'ce': loss}, probas
 
-    def configure_metrics(self):
-        """Configure task-specific metrics."""
-        class_thresholds = [0.5] * (24 - 1) # Excluding background
-        metrics = {
-            'dice': MonaiMetricWrapper(DiceMetric, include_background=False, reduction="mean", get_not_nans=False),
-            'nsd': MonaiMetricWrapper(SurfaceDiceMetric, include_background=False, class_thresholds=class_thresholds),
-        }
-        self.metrics = {
-            'val': deepcopy(metrics),
-        }
+    # TODO: fix performance issues and add metrics back
+    # def configure_metrics(self):
+    #     """Configure task-specific metrics."""
+    #     class_thresholds = [0.5] * (24 - 1) # Excluding background
+    #     metrics = {
+    #         'dice': MonaiMetricWrapper(DiceMetric, include_background=False, reduction="mean", get_not_nans=False),
+    #         'nsd': MonaiMetricWrapper(SurfaceDiceMetric, include_background=False, class_thresholds=class_thresholds),
+    #     }
+    #     self.metrics = {
+    #         'val': deepcopy(metrics),
+    #     }
