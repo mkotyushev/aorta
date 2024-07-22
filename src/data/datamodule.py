@@ -49,7 +49,7 @@ class AortaDataModule(LightningDataModule):
 
     def setup(self, stage: str = None) -> None:
         self.build_trainsforms()
-        if stage == 'fit' and (self.train_dataset is None or self.val_dataset is None):
+        if stage in ['fit', 'validate'] and (self.train_dataset is None or self.val_dataset is None):
             self.train_dataset = AortaDataset(
                 data_dirpath=self.hparams.data_dirpath,
                 names=SPLIT_TO_NAMES['train'] if not self.hparams.debug else SPLIT_TO_NAMES['train'][:5],
