@@ -1,10 +1,9 @@
 from lightning.pytorch import LightningDataModule
 from pathlib import Path
 from torch.utils.data import DataLoader, RandomSampler
-from volumentations import Compose, RandomCrop
 
 from src.data.dataset import AortaDataset
-from src.data.transforms import NormalizeHu
+from src.data.transforms import Compose, NormalizeHu, ConvertTypes, RandomCrop
 from src.data.constants import SPLIT_TO_NAMES, MIN_HU, MAX_HU
 
 
@@ -36,15 +35,15 @@ class AortaDataModule(LightningDataModule):
         self.train_transform = Compose(
             [
                 RandomCrop(image_size),
+                ConvertTypes(),
                 NormalizeHu(sub=MIN_HU, div=MAX_HU-MIN_HU, clip=True),
-            ],
-            p=1.0,
+            ]
         )
         self.val_transform = self.test_transform = Compose(
             [
+                ConvertTypes(),
                 NormalizeHu(sub=MIN_HU, div=MAX_HU-MIN_HU, clip=True),
-            ],
-            p=1.0,
+            ]
         )
 
     def setup(self, stage: str = None) -> None:
