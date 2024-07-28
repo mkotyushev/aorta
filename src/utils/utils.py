@@ -1,5 +1,6 @@
+import gc
 import torch
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, Any, Tuple
 from lightning import Trainer
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -124,3 +125,127 @@ def state_norm(module: torch.nn.Module, norm_type: Union[float, int, str], group
         total_norm = torch.tensor(list(norms.values())).norm(norm_type)
         norms[f"state_{norm_type}_norm_total"] = total_norm
     return norms
+
+
+# https://discuss.pytorch.org/t/convert-int-into-one-hot-format/507/26
+def one_hot_embedding(labels, num_classes):
+    """Embedding labels to one-hot form.
+
+    Args:
+      labels: (LongTensor) class labels, sized [N,].
+      num_classes: (int) number of classes.
+
+    Returns:
+      (tensor) encoded labels, sized [N, #classes].
+    """
+    y = torch.eye(num_classes, dtype=torch.bool, device=labels.device) 
+    return y[labels] 
+
+
+class UnpatchifyMetrics:
+    """Unpatchify predictions to original full image assuming the dataloader is sequential
+    and calculate the metrics for each full image, then aggregate them.
+    """
+    def __init__(self, n_classes, metrics):
+        self.n_classes = n_classes
+        self.metrics = metrics
+        self.name = None
+        self.preds = None
+        self.masks = None
+        self.original_shape = None 
+
+    def _reset_current(self):
+        self.name = None
+        self.preds = None
+        self.masks = None
+        self.original_shape = None 
+
+        # Cleanup heavy tensors
+        gc.collect()
+
+    def reset(self):
+        self._reset_current()
+        for metric in self.metrics.values():
+            metric.reset()
+
+    def _calculate_metrics(self):
+        # Remove padding
+        self.preds = self.preds[
+            :self.original_shape[0], 
+            :self.original_shape[1], 
+            :self.original_shape[2]
+        ]
+        self.masks = self.masks[
+            :self.original_shape[0], 
+            :self.original_shape[1], 
+            :self.original_shape[2]
+        ]
+
+        # One-hot
+        self.preds = one_hot_embedding(
+            self.preds, 
+            num_classes=self.n_classes
+        ).permute(3, 0, 1, 2).unsqueeze(0)
+        self.masks = one_hot_embedding(
+            self.masks, 
+            num_classes=self.n_classes
+        ).permute(3, 0, 1, 2).unsqueeze(0)
+
+        # Calculate metrics
+        for metric in self.metrics.values():
+            metric(self.preds, self.masks)
+
+    def _init(
+        self, 
+        name: str, 
+        padded_shape: Tuple[int, int, int], 
+        original_shape: Tuple[int, int, int],
+        device: torch.device = torch.device('cpu'),
+    ):
+        self.name = name
+        self.preds = torch.zeros(padded_shape, dtype=torch.int32, device=device)
+        self.masks = torch.zeros(padded_shape, dtype=torch.int32, device=device)
+        self.original_shape = original_shape
+
+    def update(self, batch: Dict[str, Any]):
+        """Update the metrics with the predictions and masks of the batch.
+        batch:
+            - 'name': List[str]
+            - 'padded_shape': List[Tuple[int, int, int]]
+            - 'original_shape': List[Tuple[int, int, int]]
+            - 'indices': List[Tensor[B, 3, 2]]
+            - 'pred': FloatTensor[B, C, H, W, D], probabilities
+            - 'mask': LongTensor[B, H, W, D], ground truth
+        """
+        batch['pred'] = batch['pred'].argmax(dim=1).to(torch.int32)
+        batch['mask'] = batch['mask'].to(torch.int32)
+
+        B = batch['mask'].shape[0]
+        for i in range(B):
+            name: str = batch['name'][i]
+            if self.name is None or name != self.name:
+                if self.name is not None:
+                    self._calculate_metrics()
+                    self._reset_current()
+                self._init(
+                    name, 
+                    batch['padded_shape'][i], 
+                    batch['original_shape'][i],
+                    device=batch['mask'].device,
+                )
+            self.preds[
+                batch['indices'][i][0][0]:batch['indices'][i][0][1],
+                batch['indices'][i][1][0]:batch['indices'][i][1][1],
+                batch['indices'][i][2][0]:batch['indices'][i][2][1],
+            ] = batch['pred'][i]
+            self.masks[
+                batch['indices'][i][0][0]:batch['indices'][i][0][1],
+                batch['indices'][i][1][0]:batch['indices'][i][1][1],
+                batch['indices'][i][2][0]:batch['indices'][i][2][1],
+            ] = batch['mask'][i]
+
+    def compute(self):
+        return {
+            name: metric.aggregate().item()
+            for name, metric in self.metrics.items()
+        }

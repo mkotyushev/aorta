@@ -6,6 +6,34 @@ from typing import List, Optional, Callable, Tuple
 from torch.utils.data import default_collate
 
 
+def crop_possiby_padded(arr, h_start, h_stop, w_start, w_stop, d_start, d_stop, patch_size):
+    # Crop the array, but make sure that the indices are within the array
+    arr = arr[
+        h_start:min(h_stop, arr.shape[0]),
+        w_start:min(w_stop, arr.shape[1]),
+        d_start:min(d_stop, arr.shape[2]),
+    ]
+
+    # Pad if necessary
+    if (
+        arr.shape[0] < patch_size[0] or 
+        arr.shape[1] < patch_size[1] or 
+        arr.shape[2] < patch_size[2]
+    ):
+        arr = np.pad(
+            arr,
+            [
+                (0, patch_size[0] - arr.shape[0]),
+                (0, patch_size[1] - arr.shape[1]),
+                (0, patch_size[2] - arr.shape[2]),
+            ],
+            mode='constant',
+            constant_values=0,
+        )
+
+    return arr 
+
+
 def generate_patches_3d(
     *arrays, 
     patch_size: Tuple[int, int, int] | None = None, 
@@ -13,39 +41,49 @@ def generate_patches_3d(
 ):
     assert all(arr.ndim == 3 for arr in arrays)
     assert all(arr.shape == arrays[0].shape for arr in arrays)
-    shape_before_padding = arrays[0].shape
+    original_shape = arrays[0].shape
 
     if patch_size is None:
-        yield arrays, (0, 0, 0), shape_before_padding, shape_before_padding, (1, 1, 1)
+        yield arrays, (0, 0, 0), original_shape, original_shape
     else:
-        # Pad the arrays to make them divisible by the patch size
-        arrays = [
-            np.pad(
-                arr, 
-                [
-                    (0, patch_size[i] - arr.shape[i] % patch_size[i]) 
-                    for i in range(3)
-                ]
-            ) 
-            for arr in arrays
-        ]
-        shape_after_padding = arrays[0].shape
+        if step_size is None:
+            step_size = patch_size
+        
+        padded_shape = []
+        for i in range(3):
+            if (original_shape[i] - patch_size[i]) % step_size[i] == 0:
+                padded_shape.append(original_shape[i])
+            else:
+                padded_shape.append(
+                    (original_shape[i] - patch_size[i]) // step_size[i] * step_size[i] + patch_size[i]
+                )
+        padded_shape = tuple(padded_shape)
 
-        # Patchify the arrays
-        arrays = [
-            patchify(arr, patch_size, step_size)
-            for arr in arrays
-        ]
-        shape_patches = arrays[0].shape[:3]
+        for h_start in range(0, padded_shape[0] - patch_size[0] + 1, step_size[0]):
+            h_stop = h_start + patch_size[0]
+            for w_start in range(0, padded_shape[1] - patch_size[1] + 1, step_size[1]):
+                w_stop = w_start + patch_size[1]
+                for d_start in range(0, padded_shape[2] - patch_size[2] + 1, step_size[2]):
+                    d_stop = d_start + patch_size[2]
 
-        # Yield the patches
-        for i in range(shape_patches[0]):
-            for j in range(shape_patches[1]):
-                for k in range(shape_patches[2]):
-                    yield tuple(
-                        arr[i, j, k, ...] 
+                    indices = (
+                        (h_start, h_stop),
+                        (w_start, w_stop),
+                        (d_start, d_stop),
+                    )
+                    
+                    image_patches = [
+                        crop_possiby_padded(
+                            arr, 
+                            h_start, h_stop, 
+                            w_start, w_stop, 
+                            d_start, d_stop, 
+                            patch_size
+                        )
                         for arr in arrays
-                    ), (i, j, k), shape_before_padding, shape_after_padding, shape_patches
+                    ]
+                    
+                    yield image_patches, indices, original_shape, padded_shape
 
 
 class AortaDataset:
@@ -57,7 +95,7 @@ class AortaDataset:
         patch_size: Tuple[int, int, int] | None = None, 
     ):
         assert patch_size is None or all(p == patch_size[0] for p in patch_size)
-        step_size = None if patch_size is None else patch_size[0]
+        step_size = None if patch_size is None else patch_size
 
         self.data = []
         for name in names:
@@ -65,10 +103,9 @@ class AortaDataset:
             mask, _ = io.load(data_dirpath / 'masks' / f'subject{name:03}_label.mha')
             for (
                 (image_patch, mask_patch), 
-                patch_indices, 
-                shape_before_padding, 
-                shape_after_padding,
-                shape_patches
+                indices, 
+                original_shape, 
+                padded_shape
             ) in generate_patches_3d(
                 image, mask, patch_size=patch_size, step_size=step_size,
             ):
@@ -77,10 +114,9 @@ class AortaDataset:
                         'image': image_patch,
                         'mask': mask_patch,
                         'name': name,
-                        'patch_indices': patch_indices,
-                        'shape_before_padding': shape_before_padding,
-                        'shape_after_padding': shape_after_padding,
-                        'shape_patches': shape_patches,
+                        'indices': indices,
+                        'original_shape': original_shape,
+                        'padded_shape': padded_shape,
                     }
                 )
         self.patch_size = patch_size
@@ -100,7 +136,7 @@ class AortaDataset:
         output = dict()
         for key in batch[0].keys():
             values = [item[key] for item in batch]
-            if key in ['name', 'patch_indices', 'shape_before_padding', 'shape_after_padding', 'shape_patches']:
+            if key in ['name', 'indices', 'original_shape', 'padded_shape']:
                 output[key] = values
             else:
                 output[key] = default_collate(values)

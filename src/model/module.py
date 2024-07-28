@@ -5,35 +5,18 @@ from contextlib import ExitStack
 from copy import deepcopy
 from typing import Literal
 from lightning import LightningModule
-from monai.metrics import DiceMetric, SurfaceDiceMetric, CumulativeIterationMetric
-from typing import Any, Dict, Optional, Union, Type
+from monai.metrics import DiceMetric, SurfaceDiceMetric
+from typing import Any, Dict, Optional, Union
 from torch import Tensor
 from lightning.pytorch.cli import instantiate_class
 from lightning.pytorch.utilities import grad_norm
 from unittest.mock import patch
 
-from src.utils.utils import state_norm
-from src.utils.convert_2d_to_3d import TimmUniversalEncoder3d, ConvNeXtBlock_forward_3d
+from src.utils.utils import state_norm, UnpatchifyMetrics
+from src.utils.convert_2d_to_3d import TimmUniversalEncoder3d
 
 
 logger = logging.getLogger(__name__)
-
-
-class MonaiMetricWrapper:
-    def __init__(self, metric_class: Type[CumulativeIterationMetric], **kwargs):
-        self.metric = metric_class(**kwargs)
-
-    def reset(self):
-        self.metric.reset()
-
-    def update(self, preds, targets):
-        # one-hot encoding:
-        # targets: (B, H, W, D) -> (B, classes, H, W, D)
-        targets = torch.nn.functional.one_hot(targets.long(), num_classes=preds.shape[1]).permute(0, 4, 1, 2, 3)
-        self.metric(y_pred=preds, y=targets)
-
-    def compute(self):
-        return self.metric.aggregate().item()
 
 
 class BaseModule(LightningModule):
@@ -84,7 +67,7 @@ class BaseModule(LightningModule):
         """Extract preds and targets from batch.
         Could be overriden for custom batch / prediction structure.
         """
-        y, y_pred = batch['mask'].detach().cpu(), preds.detach().cpu().bfloat16()
+        y, y_pred = batch['mask'].detach().cpu(), preds.detach().cpu()
         return y, y_pred
 
     def update_metrics(self, prefix, preds, batch):
@@ -93,7 +76,10 @@ class BaseModule(LightningModule):
             return
         y, y_proba = self.extract_targets_and_probas_for_metric(preds, batch)
         for metric in self.metrics[prefix].values():
-            metric.update(y_proba, y)
+            if isinstance(metric, UnpatchifyMetrics):
+                metric.update({'pred': y_proba, **batch})
+            else:
+                metric.update(y_proba, y)
 
     def on_train_epoch_start(self) -> None:
         """Called in the training loop at the very beginning of the epoch."""
@@ -200,13 +186,17 @@ class BaseModule(LightningModule):
                 prog_bar = (name in prog_bar_names)
 
             if metric_value is not None:
-                self.log(
-                    f'{prefix}_{name}',
-                    metric_value,
-                    on_step=on_step,
-                    on_epoch=on_epoch,
-                    prog_bar=prog_bar,
-                )
+                if not isinstance(metric_value, dict):
+                    metric_value = {name: metric_value}
+                
+                for inner_name, value in metric_value.items():
+                    self.log(
+                        f'{prefix}_{inner_name}',
+                        value,
+                        on_step=on_step,
+                        on_epoch=on_epoch,
+                        prog_bar=prog_bar,
+                    )
 
     def on_train_epoch_end(self) -> None:
         """Called in the training loop at the very end of the epoch."""
@@ -394,14 +384,24 @@ class AortaModule(BaseModule):
 
         return loss, {'ce': loss}, probas
 
-    # TODO: fix performance issues and add metrics back
-    # def configure_metrics(self):
-    #     """Configure task-specific metrics."""
-    #     class_thresholds = [0.5] * (24 - 1) # Excluding background
-    #     metrics = {
-    #         'dice': MonaiMetricWrapper(DiceMetric, include_background=False, reduction="mean", get_not_nans=False),
-    #         'nsd': MonaiMetricWrapper(SurfaceDiceMetric, include_background=False, class_thresholds=class_thresholds),
-    #     }
-    #     self.metrics = {
-    #         'val': deepcopy(metrics),
-    #     }
+    def configure_metrics(self):
+        """Configure task-specific metrics."""
+        class_thresholds = [0.5] * (24 - 1) # Excluding background
+        self.metrics = {
+            'val': {
+                'dice+nsd': UnpatchifyMetrics(
+                    n_classes=24,
+                    metrics={
+                        'dice': DiceMetric(
+                            include_background=False, 
+                            reduction="mean", 
+                            get_not_nans=False
+                        ),
+                        # 'nsd': SurfaceDiceMetric(
+                        #     include_background=False, 
+                        #     class_thresholds=class_thresholds
+                        # )
+                    },
+                ),
+            }
+        }
