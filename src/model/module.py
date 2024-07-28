@@ -181,15 +181,14 @@ class BaseModule(LightningModule):
             if reset:
                 metric.reset()
             
-            prog_bar = False
-            if prog_bar_names is not None:
-                prog_bar = (name in prog_bar_names)
-
             if metric_value is not None:
                 if not isinstance(metric_value, dict):
                     metric_value = {name: metric_value}
                 
                 for inner_name, value in metric_value.items():
+                    prog_bar = False
+                    if prog_bar_names is not None:
+                        prog_bar = (inner_name in prog_bar_names)
                     self.log(
                         f'{prefix}_{inner_name}',
                         value,
