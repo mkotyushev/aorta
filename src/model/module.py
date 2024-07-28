@@ -370,10 +370,9 @@ class AortaModule(BaseModule):
         """Compute losses and predictions."""
         image = batch['image']  # (B, 1, H, W, D)
         logits = self.model(image)  # (B, classes, H, W, D)
-        probas = torch.softmax(logits, dim=1)
 
         if 'mask' not in batch:
-            return None, None, probas
+            return None, None, logits
         
         mask = batch['mask']  # (B, H, W, D)
         loss = torch.nn.functional.cross_entropy(
@@ -382,7 +381,7 @@ class AortaModule(BaseModule):
             reduction='none',
         ).mean()  # TODO: fix non-deterministic behavior if reduction is applied
 
-        return loss, {'ce': loss}, probas
+        return loss, {'ce': loss}, logits
 
     def configure_metrics(self):
         """Configure task-specific metrics."""
