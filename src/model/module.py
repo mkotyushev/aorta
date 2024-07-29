@@ -332,6 +332,11 @@ class BaseModule(LightningModule):
 
 
 def encoder_name_to_patch_context_args(encoder_name):
+    # SMP-3D encoders
+    if not encoder_name.startswith('tu-'):
+        return []
+
+    # Custom 3D encoders
     if 'convnext' in encoder_name:
         return [
             ('segmentation_models_pytorch_3d.encoders.TimmUniversalEncoder', TimmUniversalEncoder3d),
