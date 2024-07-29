@@ -45,3 +45,15 @@ class RandomCrop:
         data['mask'] = data['mask'][h_start:h_start+self.shape[0], w_start:w_start+self.shape[1], d_start:d_start+self.shape[2]]
 
         return data
+
+
+class RandomFlip:
+    def __init__(self, axis, p):
+        self.axis = axis
+        self.p = p
+
+    def __call__(self, **data):
+        if random.random() < self.p:
+            data['image'] = np.flip(data['image'], axis=self.axis)
+            data['mask'] = np.flip(data['mask'], axis=self.axis)
+        return data
