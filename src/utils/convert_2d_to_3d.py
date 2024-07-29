@@ -337,7 +337,11 @@ def convert_2d_to_3d(layer):
                     child_layer.weight[..., None, :, :] + 
                     child_layer.weight[..., :, None, :] + 
                     child_layer.weight[..., :, :, None]
-                ) / 3,
+                ) / (
+                    child_layer.weight.shape[1] +
+                    child_layer.weight.shape[2] +
+                    child_layer.weight.shape[3]
+                ),
                 requires_grad=child_layer.weight.requires_grad
             )
             if child_layer.bias is not None:
