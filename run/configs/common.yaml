@@ -137,7 +137,7 @@ data:
   class_path: src.data.datamodule.AortaDataModule
   init_args:
     data_dirpath: /workspace/data
-    image_size: 64
+    image_size: [128, 128, 32]
     batch_size: 32
     num_workers: 10
     pin_memory: false

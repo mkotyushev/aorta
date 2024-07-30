@@ -94,7 +94,6 @@ class AortaDataset:
         transform: Optional[Callable] = None,
         patch_size: Tuple[int, int, int] | None = None, 
     ):
-        assert patch_size is None or all(p == patch_size[0] for p in patch_size)
         step_size = None if patch_size is None else patch_size
 
         self.data = []

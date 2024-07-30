@@ -1,6 +1,7 @@
 from lightning.pytorch import LightningDataModule
 from pathlib import Path
 from torch.utils.data import DataLoader, RandomSampler
+from typing import Tuple
 
 from src.data.dataset import AortaDataset
 from src.data.transforms import Compose, NormalizeHu, ConvertTypes, RandomCrop
@@ -11,7 +12,7 @@ class AortaDataModule(LightningDataModule):
     def __init__(
         self,
         data_dirpath: Path,
-        image_size: int = 64,
+        image_size: Tuple[int, int, int] = (128, 128, 32),
         debug: bool = False,
         batch_size: int = 4,
         num_workers: int = 0,
@@ -31,10 +32,9 @@ class AortaDataModule(LightningDataModule):
         self.test_transform = None
 
     def build_trainsforms(self) -> None:
-        image_size = (self.hparams.image_size, self.hparams.image_size, self.hparams.image_size)
         self.train_transform = Compose(
             [
-                RandomCrop(image_size),
+                RandomCrop(self.hparams.image_size),
                 ConvertTypes(),
                 NormalizeHu(sub=MIN_HU, div=MAX_HU-MIN_HU, clip=True),
             ]
@@ -60,14 +60,14 @@ class AortaDataModule(LightningDataModule):
                     data_dirpath=self.hparams.data_dirpath,
                     names=SPLIT_TO_NAMES['valid'],
                     transform=self.val_transform,
-                    patch_size=(self.hparams.image_size, self.hparams.image_size, self.hparams.image_size),
+                    patch_size=self.hparams.image_size,
                 )
         elif stage == 'test' and self.test_dataset is None:
             self.test_dataset = AortaDataset(
                 data_dirpath=self.hparams.data_dirpath,
                 names=SPLIT_TO_NAMES['test'],
                 transform=self.test_transform,
-                patch_size=(self.hparams.image_size, self.hparams.image_size, self.hparams.image_size),
+                patch_size=self.hparams.image_size,
             )
         
     def train_dataloader(self) -> DataLoader:
@@ -75,7 +75,7 @@ class AortaDataModule(LightningDataModule):
             data_source=self.train_dataset,
             replacement=True,
             num_samples=self.train_dataset.n_samples(
-                (self.hparams.image_size, self.hparams.image_size, self.hparams.image_size)
+                self.hparams.image_size
             ),
         )
         return DataLoader(
