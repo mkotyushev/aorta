@@ -408,3 +408,31 @@ class AortaModule(BaseModule):
                 ),
             }
         }
+
+    def extract_targets_and_probas_for_metric(self, preds, batch):
+        """Extract preds and targets from batch.
+        Could be overriden for custom batch / prediction structure.
+        """
+        # Copy and modify batch dict here to avoid modifying the original batch dict
+        # Note: tensors are here by reference, so they are not copied except for the mask
+        # and only the dict structure is copied
+        batch_copy = dict()
+        for key, value in batch.items():
+            if key == 'mask':
+                # Copies tensor, see https://pytorch.org/docs/stable/generated/torch.Tensor.detach.html
+                batch_copy[key] = value.detach().cpu()
+            else:
+                batch_copy[key] = value
+        batch_copy['pred'] = preds.detach().cpu()
+        return batch_copy
+
+    def update_metrics(self, prefix, preds, batch):
+        """Update train metrics."""
+        if self.metrics is None or prefix not in self.metrics:
+            return
+        batch = self.extract_targets_and_probas_for_metric(preds, batch)
+        for metric in self.metrics[prefix].values():
+            if isinstance(metric, UnpatchifyMetrics):
+                metric.update(batch)
+            else:
+                metric.update(batch['pred'], batch['mask'])
