@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader, RandomSampler
 from typing import Tuple
 
 from src.data.dataset import AortaDataset
-from src.data.transforms import Compose, NormalizeHu, ConvertTypes, RandomCrop, RandomFlip
+from src.data.transforms import Compose, NormalizeHu, ConvertTypes, RandomCropPad
 from src.data.constants import SPLIT_TO_NAMES, MIN_HU, MAX_HU
 
 
@@ -34,7 +34,7 @@ class AortaDataModule(LightningDataModule):
     def build_trainsforms(self) -> None:
         self.train_transform = Compose(
             [
-                RandomCrop(self.hparams.image_size),
+                RandomCropPad(self.hparams.image_size),
                 ConvertTypes(),
                 NormalizeHu(sub=MIN_HU, div=MAX_HU-MIN_HU, clip=True),
             ]

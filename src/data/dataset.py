@@ -86,6 +86,34 @@ def generate_patches_3d(
                     yield image_patches, indices, original_shape, padded_shape
 
 
+def crop_by_positive(image, mask, margin=0):
+    assert image.ndim == 3
+    assert mask.ndim == 3
+    assert image.shape == mask.shape
+
+    is_bg = (mask == 0)
+
+    is_bg_h = is_bg.all((1, 2))
+    is_bg_w = is_bg.all((0, 2))
+    is_bg_d = is_bg.all((0, 1))
+
+    h_start, h_stop = is_bg_h.argmin(), len(is_bg_h) - is_bg_h[::-1].argmin()
+    w_start, w_stop = is_bg_w.argmin(), len(is_bg_w) - is_bg_w[::-1].argmin()
+    d_start, d_stop = is_bg_d.argmin(), len(is_bg_d) - is_bg_d[::-1].argmin()
+
+    h_start = max(0, h_start - margin)
+    h_stop = min(image.shape[0], h_stop + margin)
+    w_start = max(0, w_start - margin)
+    w_stop = min(image.shape[1], w_stop + margin)
+    d_start = max(0, d_start - margin)
+    d_stop = min(image.shape[2], d_stop + margin)
+
+    return (
+        image[h_start:h_stop, w_start:w_stop, d_start:d_stop],
+        mask[h_start:h_stop, w_start:w_stop, d_start:d_stop],
+    )
+
+
 class AortaDataset:
     def __init__(
         self, 
@@ -100,6 +128,10 @@ class AortaDataset:
         for name in names:
             image, _ = io.load(data_dirpath / 'images' / f'subject{name:03}_CTA.mha')
             mask, _ = io.load(data_dirpath / 'masks' / f'subject{name:03}_label.mha')
+
+            image, mask = crop_by_positive(image, mask, margin=10)
+            print(f'Loaded {name}, image shape: {image.shape}, mask shape: {mask.shape}')
+
             for (
                 (image_patch, mask_patch), 
                 indices, 
