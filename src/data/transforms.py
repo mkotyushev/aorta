@@ -88,3 +88,22 @@ class RandomFlip:
             data['image'] = np.flip(data['image'], axis=self.axis)
             data['mask'] = np.flip(data['mask'], axis=self.axis)
         return data
+
+
+class RandomFillPlane:
+    def __init__(self, axis, p):
+        self.axis = axis
+        self.p = p
+
+    def __call__(self, **data):
+        drop_mask = np.random.rand(data['image'].shape[self.axis]) < self.p
+        if self.axis == 0:
+            data['image'][drop_mask, :, :] = 0
+            data['mask'][drop_mask, :, :] = 0
+        elif self.axis == 1:
+            data['image'][:, drop_mask, :] = 0
+            data['mask'][:, drop_mask, :] = 0
+        elif self.axis == 2:
+            data['image'][:, :, drop_mask] = 0
+            data['mask'][:, :, drop_mask] = 0
+        return data
