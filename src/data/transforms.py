@@ -7,8 +7,11 @@ class Compose:
         self.transforms = transforms
 
     def __call__(self, **data):
+        # Hack with force_apply and targets to work with volumentations
         for t in self.transforms:
-            data = t(**data)
+            data = t(force_apply=False, targets=['image', 'mask'], **data)
+            data.pop('force_apply', None)
+            data.pop('targets', None)
         return data
 
 
