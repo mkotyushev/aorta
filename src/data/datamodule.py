@@ -13,6 +13,7 @@ class AortaDataModule(LightningDataModule):
         self,
         data_dirpath: Path,
         image_size: Tuple[int, int, int] = (128, 128, 32),
+        num_samples: int = None,
         debug: bool = False,
         batch_size: int = 4,
         num_workers: int = 0,
@@ -71,12 +72,13 @@ class AortaDataModule(LightningDataModule):
             )
         
     def train_dataloader(self) -> DataLoader:
+        num_samples = self.hparams.num_samples
+        if num_samples is None:
+            num_samples = self.train_dataset.n_samples(self.hparams.image_size)
         sampler = RandomSampler(
             data_source=self.train_dataset,
             replacement=True,
-            num_samples=self.train_dataset.n_samples(
-                self.hparams.image_size
-            ),
+            num_samples=num_samples,
         )
         return DataLoader(
             dataset=self.train_dataset, 
