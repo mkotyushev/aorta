@@ -31,7 +31,7 @@ class NormalizeHu:
             data['image'] = np.clip(data['image'], 0.0, 1.0)
         return data
 
-    
+
 class RandomCropPad:
     def __init__(self, shape):
         self.shape = shape

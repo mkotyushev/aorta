@@ -86,7 +86,7 @@ def generate_patches_3d(
                     yield image_patches, indices, original_shape, padded_shape
 
 
-def crop_by_positive(image, mask, margin=0):
+def crop_by_positive(image, mask, margin=0, pad_size=None):
     assert image.ndim == 3
     assert mask.ndim == 3
     assert image.shape == mask.shape
@@ -108,10 +108,33 @@ def crop_by_positive(image, mask, margin=0):
     d_start = max(0, d_start - margin)
     d_stop = min(image.shape[2], d_stop + margin)
 
-    return (
-        image[h_start:h_stop, w_start:w_stop, d_start:d_stop],
-        mask[h_start:h_stop, w_start:w_stop, d_start:d_stop],
-    )
+    image = image[h_start:h_stop, w_start:w_stop, d_start:d_stop]
+    mask = mask[h_start:h_stop, w_start:w_stop, d_start:d_stop]
+
+    if (
+        pad_size is not None and
+        (
+            image.shape[0] < pad_size[0] or 
+            image.shape[1] < pad_size[1] or 
+            image.shape[2] < pad_size[2])
+    ):
+        h_pad = max(0, pad_size[0] - image.shape[0])
+        w_pad = max(0, pad_size[1] - image.shape[1])
+        d_pad = max(0, pad_size[2] - image.shape[2])
+
+        h_pad_before = h_pad // 2
+        h_pad_after = h_pad - h_pad_before
+        w_pad_before = w_pad // 2
+        w_pad_after = w_pad - w_pad_before
+        d_pad_before = d_pad // 2
+        d_pad_after = d_pad - d_pad_before
+
+        pad = ((h_pad_before, h_pad_after), (w_pad_before, w_pad_after), (d_pad_before, d_pad_after))
+
+        image = np.pad(image, pad, mode='constant', constant_values=0)
+        mask = np.pad(mask, pad, mode='constant', constant_values=0)
+
+    return image, mask
 
 
 class AortaDataset:
@@ -121,6 +144,7 @@ class AortaDataset:
         names: List[str],
         transform: Optional[Callable] = None,
         patch_size: Tuple[int, int, int] | None = None, 
+        pad_size: Tuple[int, int, int] | None = None,
     ):
         step_size = None if patch_size is None else patch_size
 
@@ -129,7 +153,7 @@ class AortaDataset:
             image, _ = io.load(data_dirpath / 'images' / f'subject{name:03}_CTA.mha')
             mask, _ = io.load(data_dirpath / 'masks' / f'subject{name:03}_label.mha')
 
-            image, mask = crop_by_positive(image, mask, margin=10)
+            image, mask = crop_by_positive(image, mask, margin=10, pad_size=pad_size)
             print(f'Loaded {name}, image shape: {image.shape}, mask shape: {mask.shape}')
 
             for (
