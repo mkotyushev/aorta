@@ -100,9 +100,12 @@ model:
   init_args:
     seg_arch: smp.Unet
     seg_kwargs:
-      encoder_name: efficientnet-b5
+      encoder_name: tu-convnextv2_nano.fcmae_ft_in22k_in1k_384
       in_channels: 1
       classes: 24
+      encoder_depth: 4
+      decoder_channels: [256, 128, 64, 32]
+      strides: [[4, 4, 4], [2, 2, 2], [2, 2, 2], [2, 2, 2]]
     optimizer_init:
       class_path: torch.optim.AdamW
       init_args:
