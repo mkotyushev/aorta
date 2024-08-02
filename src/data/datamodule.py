@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader, RandomSampler
 from typing import Tuple
 
 from src.data.dataset import AortaDataset
-from src.data.transforms import Compose, NormalizeHu, ConvertTypes, RandomCropPad
+from src.data.transforms import Compose, NormalizeHu, ConvertTypes, RandomCropPad, RandomFillPlane
 from src.data.constants import SPLIT_TO_NAMES, MIN_HU, MAX_HU
 
 
@@ -36,6 +36,7 @@ class AortaDataModule(LightningDataModule):
         self.train_transform = Compose(
             [
                 RandomCropPad(self.hparams.image_size),
+                RandomFillPlane(axis=2, p=0.1),
                 ConvertTypes(),
                 NormalizeHu(sub=MIN_HU, div=MAX_HU-MIN_HU, clip=True),
             ]
@@ -55,6 +56,7 @@ class AortaDataModule(LightningDataModule):
                     data_dirpath=self.hparams.data_dirpath,
                     names=SPLIT_TO_NAMES['train'] if not self.hparams.debug else SPLIT_TO_NAMES['train'][:5],
                     transform=self.train_transform,
+                    pad_size=self.hparams.image_size,
                 )
             if stage in ['fit', 'validate'] and self.val_dataset is None:
                 self.val_dataset = AortaDataset(
@@ -62,13 +64,16 @@ class AortaDataModule(LightningDataModule):
                     names=SPLIT_TO_NAMES['valid'],
                     transform=self.val_transform,
                     patch_size=self.hparams.image_size,
+                    pad_size=self.hparams.image_size,
                 )
         elif stage == 'test' and self.test_dataset is None:
+            # TODO: undo cropping and padding for test dataset
             self.test_dataset = AortaDataset(
                 data_dirpath=self.hparams.data_dirpath,
                 names=SPLIT_TO_NAMES['test'],
                 transform=self.test_transform,
                 patch_size=self.hparams.image_size,
+                pad_size=self.hparams.image_size,
             )
         
     def train_dataloader(self) -> DataLoader:

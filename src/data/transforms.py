@@ -7,8 +7,11 @@ class Compose:
         self.transforms = transforms
 
     def __call__(self, **data):
+        # Hack with force_apply and targets to work with volumentations
         for t in self.transforms:
-            data = t(**data)
+            data = t(force_apply=False, targets=['image', 'mask'], **data)
+            data.pop('force_apply', None)
+            data.pop('targets', None)
         return data
 
 
@@ -31,7 +34,7 @@ class NormalizeHu:
             data['image'] = np.clip(data['image'], 0.0, 1.0)
         return data
 
-    
+
 class RandomCropPad:
     def __init__(self, shape):
         self.shape = shape
@@ -84,4 +87,23 @@ class RandomFlip:
         if random.random() < self.p:
             data['image'] = np.flip(data['image'], axis=self.axis)
             data['mask'] = np.flip(data['mask'], axis=self.axis)
+        return data
+
+
+class RandomFillPlane:
+    def __init__(self, axis, p):
+        self.axis = axis
+        self.p = p
+
+    def __call__(self, **data):
+        drop_mask = np.random.rand(data['image'].shape[self.axis]) < self.p
+        if self.axis == 0:
+            data['image'][drop_mask, :, :] = 0
+            data['mask'][drop_mask, :, :] = 0
+        elif self.axis == 1:
+            data['image'][:, drop_mask, :] = 0
+            data['mask'][:, drop_mask, :] = 0
+        elif self.axis == 2:
+            data['image'][:, :, drop_mask] = 0
+            data['mask'][:, :, drop_mask] = 0
         return data
