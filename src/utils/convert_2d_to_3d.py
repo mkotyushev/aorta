@@ -321,6 +321,7 @@ def convert_2d_to_3d(layer):
         new_child_layer = None
         if isinstance(child_layer, nn.Conv2d):
             assert child_layer.weight.shape[-1] == child_layer.weight.shape[-2]
+            new_dim = child_layer.weight.shape[-1]
 
             new_child_layer = nn.Conv3d(
                 in_channels=child_layer.in_channels, 
@@ -334,14 +335,10 @@ def convert_2d_to_3d(layer):
             )
             new_child_layer.weight = nn.Parameter(
                 (
-                    child_layer.weight[..., None, :, :] + 
-                    child_layer.weight[..., :, None, :] + 
-                    child_layer.weight[..., :, :, None]
-                ) / (
-                    child_layer.weight.shape[1] +
-                    child_layer.weight.shape[2] +
-                    child_layer.weight.shape[3]
-                ),
+                    (child_layer.weight[..., None, :, :] / new_dim) + 
+                    (child_layer.weight[..., :, None, :] / new_dim) + 
+                    (child_layer.weight[..., :, :, None] / new_dim)
+                ) / 3,
                 requires_grad=child_layer.weight.requires_grad
             )
             if child_layer.bias is not None:
