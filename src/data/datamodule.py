@@ -2,6 +2,7 @@ from lightning.pytorch import LightningDataModule
 from pathlib import Path
 from torch.utils.data import DataLoader, RandomSampler
 from typing import Tuple
+from volumentations import ElasticTransform, GaussianNoise, GlassBlur, GridDistortion, GridDropout, ImageCompression, RotatePseudo2D, RandomBrightnessContrast
 
 from src.data.dataset import AortaDataset
 from src.data.transforms import Compose, NormalizeHu, ConvertTypes, RandomCropPad, RandomFillPlane
@@ -38,6 +39,14 @@ class AortaDataModule(LightningDataModule):
                 RandomCropPad(self.hparams.image_size),
                 RandomFillPlane(axis=2, p=0.1),
                 ConvertTypes(),
+                RandomBrightnessContrast(p=0.5),
+                ElasticTransform(p=0.5), 
+                GaussianNoise(p=0.5), 
+                GlassBlur(p=0.5), 
+                GridDistortion(p=0.5), 
+                GridDropout(p=0.5), 
+                RotatePseudo2D(p=0.5), 
+                ConvertTypes(),  # Convert from float64 to float32
                 NormalizeHu(sub=MIN_HU, div=MAX_HU-MIN_HU, clip=True),
             ]
         )
