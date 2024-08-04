@@ -107,3 +107,16 @@ class RandomFillPlane:
             data['image'][:, :, drop_mask] = 0
             data['mask'][:, :, drop_mask] = 0
         return data
+
+
+class CenteredGaussianNoise:
+    def __init__(self, std_lim=(0, 100), p=0.5):
+        self.std_lim = std_lim
+        self.p = p
+
+    def __call__(self, **data):
+        if random.random() < self.p:
+            std = random.uniform(*self.std_lim)
+            noise = np.random.normal(0, std, data['image'].shape)
+            data['image'] += noise
+        return data
