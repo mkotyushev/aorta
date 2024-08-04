@@ -400,10 +400,10 @@ class AortaModule(BaseModule):
                             reduction="mean", 
                             get_not_nans=False
                         ),
-                        # 'nsd': SurfaceDiceMetric(
-                        #     include_background=False, 
-                        #     class_thresholds=class_thresholds
-                        # )
+                        'nsd': SurfaceDiceMetric(
+                            include_background=False, 
+                            class_thresholds=class_thresholds
+                        )
                     },
                 ),
             }
