@@ -30,6 +30,7 @@ class BaseModule(LightningModule):
         lr_layer_decay: Union[float, Dict[str, float]] = 1.0,
         skip_nan: bool = False,
         prog_bar_names: Optional[list] = None,
+        lr: float = None,
     ):
         super().__init__()
         self.save_hyperparameters()
