@@ -116,7 +116,7 @@ model:
   init_args:
     seg_arch: DeepLabV3Plus
     seg_kwargs:
-      encoder_name: tu-convnextv2_atto.fcmae_ft_in1k
+      encoder_name: tu-convnextv2_nano.fcmae_ft_in22k_in1k_384
       in_channels: 1
       classes: 24
       encoder_depth: 4
