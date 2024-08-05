@@ -2,8 +2,6 @@ import logging
 import torch
 import segmentation_models_pytorch_3d as smp
 from contextlib import ExitStack
-from copy import deepcopy
-from typing import Literal
 from lightning import LightningModule
 from monai.metrics import DiceMetric, SurfaceDiceMetric
 from typing import Any, Dict, Optional, Union
@@ -14,6 +12,7 @@ from unittest.mock import patch
 
 from src.utils.utils import state_norm, UnpatchifyMetrics
 from src.utils.convert_2d_to_3d import TimmUniversalEncoder3d
+from src.model.my_smp.deeplabv3_model import DeepLabV3Plus
 
 
 logger = logging.getLogger(__name__)
@@ -350,7 +349,7 @@ def encoder_name_to_patch_context_args(encoder_name):
 class AortaModule(BaseModule):
     def __init__(
         self,
-        seg_arch: Literal['smp.Unet'],
+        seg_arch: str,
         seg_kwargs: Dict[str, Any],
         **base_kwargs,
     ):
@@ -360,6 +359,7 @@ class AortaModule(BaseModule):
         # Select segmentation model class
         seg_arch_to_class = {
             'smp.Unet': smp.Unet,
+            'DeepLabV3Plus': DeepLabV3Plus,
         }
         seg_class = seg_arch_to_class[seg_arch]
 
