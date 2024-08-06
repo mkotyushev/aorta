@@ -337,7 +337,7 @@ def encoder_name_to_patch_context_args(encoder_name):
         return []
 
     # Custom 3D encoders
-    if 'convnext' in encoder_name:
+    if 'convnext' in encoder_name or 'efficientnet' in encoder_name:
         return [
             ('segmentation_models_pytorch_3d.encoders.TimmUniversalEncoder', TimmUniversalEncoder3d),
             # ('timm.models.convnext.ConvNeXtBlock.forward', ConvNeXtBlock_forward_3d),
