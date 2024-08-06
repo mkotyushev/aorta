@@ -19,18 +19,21 @@ def generalized_surface_loss(logits, mask, dtm, weights=None, type='multiclass',
         raise ValueError(f'Unknown type: {type}')
     
     n_classes = probas.shape[1]
-    if weights is None:
-        weights = torch.ones(n_classes).float().to(probas.device) / probas.size(1)
-
     mask_onehot = F.one_hot(mask, num_classes=n_classes).float()  # (B, H, W, D, classes)
     mask_onehot = mask_onehot.permute(0, 4, 1, 2, 3)  # (B, classes, H, W, D)
 
     num = (dtm * (1 - (mask_onehot + probas)) ** 2)  # (B, classes, H, W, D)
     num = num.sum(dim=(2, 3, 4))  # (B, classes)
-    num = (weights[None, :] * num).sum(1)  # (B,)
+    if weights is None:
+        num = num.sum(1)  # (B,)
+    else:
+        num = (weights[None, :] * num).sum(1)  # (B,)
 
     den = (dtm ** 2).sum(dim=(2, 3, 4))  # (B, classes)
-    den = (weights[None, :] * den).sum(1)  # (B,)
+    if weights is None:
+        den = den.sum(1)  # (B,)
+    else:
+        den = (weights[None, :] * den).sum(1)  # (B,)
 
     gsl = 1 - num / den  # (B,)
     if reduction == 'mean':
