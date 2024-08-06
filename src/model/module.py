@@ -408,7 +408,7 @@ class AortaModule(BaseModule):
             loss = gsl
             losses['gsl'] = gsl
         elif self.hparams.loss_name == 'gsl_ce_scheduled':
-            alpha = self.current_epoch / self.trainer.max_epochs
+            alpha = self.trainer.global_step / self.trainer.estimated_stepping_batches
             loss = (1 - alpha) * ce + alpha * gsl
             losses['ce'] = ce
             losses['gsl'] = gsl
