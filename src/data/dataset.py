@@ -4,29 +4,34 @@ from medpy import io
 from pathlib import Path
 from typing import List, Optional, Callable, Tuple
 from torch.utils.data import default_collate
+from scipy.ndimage import distance_transform_edt
+
+from src.data.constants import N_CLASSES
 
 
 def crop_possiby_padded(arr, h_start, h_stop, w_start, w_stop, d_start, d_stop, patch_size):
     # Crop the array, but make sure that the indices are within the array
     arr = arr[
-        h_start:min(h_stop, arr.shape[0]),
-        w_start:min(w_stop, arr.shape[1]),
-        d_start:min(d_stop, arr.shape[2]),
+        ...,
+        h_start:min(h_stop, arr.shape[-3]),
+        w_start:min(w_stop, arr.shape[-2]),
+        d_start:min(d_stop, arr.shape[-1]),
     ]
 
     # Pad if necessary
     if (
-        arr.shape[0] < patch_size[0] or 
-        arr.shape[1] < patch_size[1] or 
-        arr.shape[2] < patch_size[2]
+        arr.shape[-3] < patch_size[0] or 
+        arr.shape[-2] < patch_size[1] or 
+        arr.shape[-1] < patch_size[2]
     ):
+        padding = [(0, 0)] * (arr.ndim - 3) + [
+            (0, patch_size[0] - arr.shape[0]),
+            (0, patch_size[1] - arr.shape[1]),
+            (0, patch_size[2] - arr.shape[2]),
+        ]
         arr = np.pad(
             arr,
-            [
-                (0, patch_size[0] - arr.shape[0]),
-                (0, patch_size[1] - arr.shape[1]),
-                (0, patch_size[2] - arr.shape[2]),
-            ],
+            padding,
             mode='constant',
             constant_values=0,
         )
@@ -39,9 +44,8 @@ def generate_patches_3d(
     patch_size: Tuple[int, int, int] | None = None, 
     step_size: int = None,
 ):
-    assert all(arr.ndim == 3 for arr in arrays)
-    assert all(arr.shape == arrays[0].shape for arr in arrays)
-    original_shape = arrays[0].shape
+    assert all(arr.shape[-3:] == arrays[0].shape[-3:] for arr in arrays)
+    original_shape = arrays[0].shape[-3:]
 
     if patch_size is None:
         yield arrays, (0, 0, 0), original_shape, original_shape
@@ -156,18 +160,23 @@ class AortaDataset:
             image, mask = crop_by_positive(image, mask, margin=10, pad_size=pad_size)
             print(f'Loaded {name}, image shape: {image.shape}, mask shape: {mask.shape}')
 
+            dtm = np.zeros((N_CLASSES, *mask.shape), dtype=np.float32)
+            for i in range(N_CLASSES):
+                dtm[i] = distance_transform_edt(mask == i)
+
             for (
-                (image_patch, mask_patch), 
+                (image_patch, mask_patch, dtm_patch), 
                 indices, 
                 original_shape, 
                 padded_shape
             ) in generate_patches_3d(
-                image, mask, patch_size=patch_size, step_size=step_size,
+                image, mask, dtm, patch_size=patch_size, step_size=step_size,
             ):
                 self.data.append(
                     {
                         'image': image_patch,
                         'mask': mask_patch,
+                        'dtm': dtm_patch,
                         'name': name,
                         'indices': indices,
                         'original_shape': original_shape,

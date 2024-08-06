@@ -4,7 +4,7 @@ import segmentation_models_pytorch_3d as smp
 from contextlib import ExitStack
 from lightning import LightningModule
 from monai.metrics import DiceMetric, SurfaceDiceMetric
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, Literal
 from torch import Tensor
 from lightning.pytorch.cli import instantiate_class
 from lightning.pytorch.utilities import grad_norm
@@ -13,6 +13,7 @@ from unittest.mock import patch
 from src.utils.utils import state_norm, UnpatchifyMetrics
 from src.utils.convert_2d_to_3d import TimmUniversalEncoder3d
 from src.model.my_smp.deeplabv3_model import DeepLabV3Plus
+from src.model.loss import generalized_surface_loss
 
 
 logger = logging.getLogger(__name__)
@@ -351,6 +352,7 @@ class AortaModule(BaseModule):
         self,
         seg_arch: str,
         seg_kwargs: Dict[str, Any],
+        loss_name: Literal['ce', 'gsl', 'gsl_ce_scheduled'] = 'ce',
         **base_kwargs,
     ):
         super().__init__(**base_kwargs)
@@ -380,13 +382,38 @@ class AortaModule(BaseModule):
             return None, None, logits
         
         mask = batch['mask']  # (B, H, W, D)
-        loss = torch.nn.functional.cross_entropy(
-            logits,
-            mask.long(),
-            reduction='none',
-        ).mean()  # TODO: fix non-deterministic behavior if reduction is applied
 
-        return loss, {'ce': loss}, logits
+        ce, gsl, losses = None, None, dict()
+        if self.hparams.loss_name in ['ce', 'gsl_ce_scheduled']:
+            ce = torch.nn.functional.cross_entropy(
+                logits,
+                mask.long(),
+                reduction='none',
+            ).mean()  # TODO: fix non-deterministic behavior if reduction is applied
+        if self.hparams.loss_name in ['gsl', 'gsl_ce_scheduled']:
+            dtm = batch['dtm']  # (B, C, H, W, D)
+            gsl = generalized_surface_loss(
+                logits,
+                mask.long(),
+                dtm,
+                weights=None,  # TODO: add weights
+                type='multiclass',
+                reduction='mean',
+            )
+        
+        if self.hparams.loss_name == 'ce':
+            loss = ce
+            losses['ce'] = ce
+        elif self.hparams.loss_name == 'gsl':
+            loss = gsl
+            losses['gsl'] = gsl
+        elif self.hparams.loss_name == 'gsl_ce_scheduled':
+            alpha = self.current_epoch / self.trainer.max_epochs
+            loss = (1 - alpha) * ce + alpha * gsl
+            losses['ce'] = ce
+            losses['gsl'] = gsl
+
+        return loss, losses, logits
 
     def configure_metrics(self):
         """Configure task-specific metrics."""
