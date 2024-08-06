@@ -160,6 +160,7 @@ class AortaDataset:
         transform: Optional[Callable] = None,
         patch_size: Tuple[int, int, int] | None = None, 
         pad_size: Tuple[int, int, int] | None = None,
+        load_dtm: bool = False,
     ):
         step_size = None if patch_size is None else patch_size
 
@@ -167,32 +168,47 @@ class AortaDataset:
         for name in names:
             image, _ = io.load(data_dirpath / 'images' / f'subject{name:03}_CTA.mha')
             mask, _ = io.load(data_dirpath / 'masks' / f'subject{name:03}_label.mha')
-            dtm = np.load(data_dirpath / 'dtms' / f'subject{name:03}_label.npy')
+            dtm = None
+            if load_dtm:
+                dtm = np.load(data_dirpath / 'dtms' / f'subject{name:03}_label.npy')
 
             # DTM already cropped by mask when saved
             mask, image, _ = crop_by_positive(mask, image, dtm=None, margin=10, pad_size=pad_size)
-            assert mask.shape == image.shape == dtm.shape[-3:]
-            print(f'Loaded {name}, image shape: {image.shape}, mask shape: {mask.shape}, dtm shape: {dtm.shape}')
+            assert mask.shape == image.shape 
+            if load_dtm:
+                assert dtm.shape[-3:] == image.shape
+            print(f'Loaded {name}, image shape: {image.shape}, mask shape: {mask.shape}, dtm shape: {None if dtm is None else dtm.shape}')
+
+            if dtm is None:
+                arrays = image, mask
+            else:
+                arrays = image, mask, dtm
 
             for (
-                (image_patch, mask_patch, dtm_patch), 
+                arrays_patch, 
                 indices, 
                 original_shape, 
                 padded_shape
             ) in generate_patches_3d(
-                image, mask, dtm, patch_size=patch_size, step_size=step_size,
+                *arrays, patch_size=patch_size, step_size=step_size,
             ):
-                self.data.append(
-                    {
-                        'image': image_patch,
-                        'mask': mask_patch,
-                        'dtm': dtm_patch,
-                        'name': name,
-                        'indices': indices,
-                        'original_shape': original_shape,
-                        'padded_shape': padded_shape,
-                    }
-                )
+                if dtm is None:
+                    image_patch, mask_patch = arrays_patch
+                else:
+                    image_patch, mask_patch, dtm_patch = arrays_patch
+
+                item = {
+                    'image': image_patch,
+                    'mask': mask_patch,
+                    'name': name,
+                    'indices': indices,
+                    'original_shape': original_shape,
+                    'padded_shape': padded_shape,
+                }
+                if dtm is not None:
+                    item['dtm'] = dtm_patch
+                self.data.append(item)
+
         self.patch_size = patch_size
         self.transform = transform
     

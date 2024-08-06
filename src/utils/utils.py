@@ -27,7 +27,11 @@ class MyLightningCLI(LightningCLI):
         if 'fit' in self.config and self.config['fit']['model']['init_args']['lr'] is not None:
             self.config['fit']['model']['init_args']['optimizer_init']['init_args']['lr'] = \
                 self.config['fit']['model']['init_args']['lr']
-
+            
+        # If loss requires DTM, set load_dtm flag of datamodule to True
+        loss_name = self.config['fit']['model']['init_args']['loss_name']
+        if 'fit' in self.config and 'gsl' in loss_name:
+            self.config['fit']['data']['init_args']['load_dtm'] = True
 
 
 class TrainerWandb(Trainer):
