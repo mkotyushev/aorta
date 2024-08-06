@@ -19,6 +19,11 @@ class ConvertTypes:
     def __call__(self, **data):
         data['image'] = data['image'].astype(np.float32)
         data['mask'] = data['mask'].astype(np.int32)
+        
+        if 'dtm' in data:
+            diag = np.sqrt(data['image'].shape[0]**2 + data['image'].shape[1]**2 + data['image'].shape[2]**2)
+            data['dtm'] = data['dtm'].astype(np.float32) / 32767.0 * diag
+        
         return data
 
 
