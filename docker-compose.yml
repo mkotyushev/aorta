@@ -7,7 +7,7 @@ services:
     build:
       context: .
       dockerfile: .devcontainer/Dockerfile
-    shm_size: '32gb'
+    shm_size: '48gb'
     env_file:
       - .env
     volumes:
@@ -23,7 +23,7 @@ services:
               count: 1
               capabilities: [gpu]
         limits:
-          memory: 55g
+          memory: 60g
 volumes:
   data:
   pip_cache:
