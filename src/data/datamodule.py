@@ -2,10 +2,9 @@ from lightning.pytorch import LightningDataModule
 from pathlib import Path
 from torch.utils.data import DataLoader, RandomSampler
 from typing import Tuple
-from volumentations import RotatePseudo2D, GridDistortion
 
 from src.data.dataset import AortaDataset
-from src.data.transforms import Compose, NormalizeHu, ConvertTypes, RandomCropPad, CenteredGaussianNoise
+from src.data.transforms import Compose, NormalizeHu, ConvertTypes, RandomCropPad, CenteredGaussianNoise, RotatePseudo2D, GridDistortion
 from src.data.constants import SPLIT_TO_NAMES, MIN_HU, MAX_HU
 
 
