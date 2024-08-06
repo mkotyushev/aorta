@@ -20,7 +20,7 @@ class ConvertTypes:
         data['image'] = data['image'].astype(np.float32)
         data['mask'] = data['mask'].astype(np.int32)
         if 'dtm' in data:
-            data['dtm'] = data['dtm'] / 32767.0  # to [-1, 1] range
+            data['dtm'] = ((data['dtm'] / 255.0) * 2 - 1)  # to [-1, 1] range
         
         return data
 
