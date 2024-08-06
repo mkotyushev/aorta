@@ -59,6 +59,8 @@ class RandomCropPad:
 
         data['image'] = data['image'][h_start:h_stop, w_start:w_stop, d_start:d_stop]
         data['mask'] = data['mask'][h_start:h_stop, w_start:w_stop, d_start:d_stop]
+        if 'dtm' in data:
+            data['dtm'] = data['dtm'][:, h_start:h_stop, w_start:w_stop, d_start:d_stop]
 
         if (
             data['image'].shape[0] < self.shape[0] or
@@ -79,6 +81,8 @@ class RandomCropPad:
             pad = ((h_pad_before, h_pad_after), (w_pad_before, w_pad_after), (d_pad_before, d_pad_after))
             data['image'] = np.pad(data['image'], pad, mode='constant', constant_values=0)
             data['mask'] = np.pad(data['mask'], pad, mode='constant', constant_values=0)
+            if 'dtm' in data:
+                data['dtm'] = np.pad(data['dtm'], ((0, 0), *pad), mode='constant', constant_values=0)
 
         return data
 
