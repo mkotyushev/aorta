@@ -90,10 +90,13 @@ def generate_patches_3d(
                     yield image_patches, indices, original_shape, padded_shape
 
 
-def crop_by_positive(image, mask, margin=0, pad_size=None):
+def crop_by_positive(image, mask, dtm=None, margin=0, pad_size=None):
     assert image.ndim == 3
     assert mask.ndim == 3
     assert image.shape == mask.shape
+    if dtm is not None:
+        assert dtm.ndim == 4
+        assert image.shape == dtm.shape[-3:]
 
     is_bg = (mask == 0)
 
@@ -114,6 +117,8 @@ def crop_by_positive(image, mask, margin=0, pad_size=None):
 
     image = image[h_start:h_stop, w_start:w_stop, d_start:d_stop]
     mask = mask[h_start:h_stop, w_start:w_stop, d_start:d_stop]
+    if dtm is not None:
+        dtm = dtm[:, h_start:h_stop, w_start:w_stop, d_start:d_stop]
 
     if (
         pad_size is not None and
@@ -137,8 +142,10 @@ def crop_by_positive(image, mask, margin=0, pad_size=None):
 
         image = np.pad(image, pad, mode='constant', constant_values=0)
         mask = np.pad(mask, pad, mode='constant', constant_values=0)
+        if dtm is not None:
+            dtm = np.pad(dtm, pad, mode='constant', constant_values=0)
 
-    return image, mask
+    return image, mask, dtm
 
 
 class AortaDataset:
@@ -156,13 +163,10 @@ class AortaDataset:
         for name in names:
             image, _ = io.load(data_dirpath / 'images' / f'subject{name:03}_CTA.mha')
             mask, _ = io.load(data_dirpath / 'masks' / f'subject{name:03}_label.mha')
+            dtm = np.load(data_dirpath / 'dtms' / f'subject{name:03}_label.npy')
 
-            image, mask = crop_by_positive(image, mask, margin=10, pad_size=pad_size)
-            print(f'Loaded {name}, image shape: {image.shape}, mask shape: {mask.shape}')
-
-            dtm = np.zeros((N_CLASSES, *mask.shape), dtype=np.float32)
-            for i in range(N_CLASSES):
-                dtm[i] = distance_transform_edt(mask == i)
+            image, mask, dtm = crop_by_positive(image, mask, dtm, margin=10, pad_size=pad_size)
+            print(f'Loaded {name}, image shape: {image.shape}, mask shape: {mask.shape}, dtm shape: {dtm.shape}')
 
             for (
                 (image_patch, mask_patch, dtm_patch), 
