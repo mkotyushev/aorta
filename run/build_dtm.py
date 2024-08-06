@@ -13,15 +13,20 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('masks_dirpath', type=Path)
     parser.add_argument('output_dirpath', type=Path)
-    parser.add_argument('--n_jobs', type=int, default=10)
+    parser.add_argument('--n_jobs', type=int, default=2)
     return parser.parse_args()
 
 
 def build_and_save_dtm(mask_filepath, output_filepath):
     mask, _ = io.load(mask_filepath)
-    dtm = np.zeros((N_CLASSES, *mask.shape), dtype=np.float16)
+    dtm = np.zeros((N_CLASSES, *mask.shape), dtype=np.int16)
+    diag = np.sqrt(np.sum(np.square(mask.shape)))
     for i in range(N_CLASSES):
-        dtm[i] = distance_transform_edt(mask == i)
+        d = (
+            distance_transform_edt(mask == i) - 
+            distance_transform_edt(mask != i)
+        ) / diag
+        dtm[i] = (d * 32767).astype(np.int16)
     np.save(output_filepath, dtm)
 
 
