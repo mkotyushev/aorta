@@ -90,13 +90,15 @@ def generate_patches_3d(
                     yield image_patches, indices, original_shape, padded_shape
 
 
-def crop_by_positive(image, mask, dtm=None, margin=0, pad_size=None):
-    assert image.ndim == 3
+def crop_by_positive(mask, image=None, dtm=None, margin=0, pad_size=None):
     assert mask.ndim == 3
-    assert image.shape == mask.shape
+    shape = mask.shape
+    if image is not None:
+        assert image.ndim == 3
+        assert image.shape == shape
     if dtm is not None:
         assert dtm.ndim == 4
-        assert image.shape == dtm.shape[-3:]
+        assert dtm.shape[-3:] == shape 
 
     is_bg = (mask == 0)
 
@@ -109,13 +111,14 @@ def crop_by_positive(image, mask, dtm=None, margin=0, pad_size=None):
     d_start, d_stop = is_bg_d.argmin(), len(is_bg_d) - is_bg_d[::-1].argmin()
 
     h_start = max(0, h_start - margin)
-    h_stop = min(image.shape[0], h_stop + margin)
+    h_stop = min(shape[0], h_stop + margin)
     w_start = max(0, w_start - margin)
-    w_stop = min(image.shape[1], w_stop + margin)
+    w_stop = min(shape[1], w_stop + margin)
     d_start = max(0, d_start - margin)
-    d_stop = min(image.shape[2], d_stop + margin)
+    d_stop = min(shape[2], d_stop + margin)
 
-    image = image[h_start:h_stop, w_start:w_stop, d_start:d_stop]
+    if image is not None:
+        image = image[h_start:h_stop, w_start:w_stop, d_start:d_stop]
     mask = mask[h_start:h_stop, w_start:w_stop, d_start:d_stop]
     if dtm is not None:
         dtm = dtm[:, h_start:h_stop, w_start:w_stop, d_start:d_stop]
@@ -123,13 +126,13 @@ def crop_by_positive(image, mask, dtm=None, margin=0, pad_size=None):
     if (
         pad_size is not None and
         (
-            image.shape[0] < pad_size[0] or 
-            image.shape[1] < pad_size[1] or 
-            image.shape[2] < pad_size[2])
+            shape[0] < pad_size[0] or 
+            shape[1] < pad_size[1] or 
+            shape[2] < pad_size[2])
     ):
-        h_pad = max(0, pad_size[0] - image.shape[0])
-        w_pad = max(0, pad_size[1] - image.shape[1])
-        d_pad = max(0, pad_size[2] - image.shape[2])
+        h_pad = max(0, pad_size[0] - shape[0])
+        w_pad = max(0, pad_size[1] - shape[1])
+        d_pad = max(0, pad_size[2] - shape[2])
 
         h_pad_before = h_pad // 2
         h_pad_after = h_pad - h_pad_before
@@ -140,12 +143,13 @@ def crop_by_positive(image, mask, dtm=None, margin=0, pad_size=None):
 
         pad = ((h_pad_before, h_pad_after), (w_pad_before, w_pad_after), (d_pad_before, d_pad_after))
 
-        image = np.pad(image, pad, mode='constant', constant_values=0)
+        if image is not None:
+            image = np.pad(image, pad, mode='constant', constant_values=0)
         mask = np.pad(mask, pad, mode='constant', constant_values=0)
         if dtm is not None:
             dtm = np.pad(dtm, pad, mode='constant', constant_values=0)
 
-    return image, mask, dtm
+    return mask, image, dtm
 
 
 class AortaDataset:
@@ -165,7 +169,9 @@ class AortaDataset:
             mask, _ = io.load(data_dirpath / 'masks' / f'subject{name:03}_label.mha')
             dtm = np.load(data_dirpath / 'dtms' / f'subject{name:03}_label.npy')
 
-            image, mask, dtm = crop_by_positive(image, mask, dtm, margin=10, pad_size=pad_size)
+            # DTM already cropped by mask when saved
+            mask, image, _ = crop_by_positive(mask, image, dtm=None, margin=10, pad_size=pad_size)
+            assert mask.shape == image.shape == dtm.shape[-3:]
             print(f'Loaded {name}, image shape: {image.shape}, mask shape: {mask.shape}, dtm shape: {dtm.shape}')
 
             for (

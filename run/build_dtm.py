@@ -7,6 +7,7 @@ from scipy.ndimage import distance_transform_edt
 from tqdm import tqdm
 
 from src.data.constants import N_CLASSES
+from src.data.dataset import crop_by_positive
 
 
 def parse_args():
@@ -17,8 +18,9 @@ def parse_args():
     return parser.parse_args()
 
 
-def build_and_save_dtm(mask_filepath, output_filepath):
+def build_and_save_dtm(mask_filepath, output_filepath, pad_size=(128, 128, 128)):
     mask, _ = io.load(mask_filepath)
+    mask, _, _ = crop_by_positive(mask, image=None, dtm=None, margin=10, pad_size=pad_size)
     dtm = np.zeros((N_CLASSES, *mask.shape), dtype=np.int16)
     diag = np.sqrt(np.sum(np.square(mask.shape)))
     for i in range(N_CLASSES):
