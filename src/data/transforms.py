@@ -58,7 +58,7 @@ class RandomCropPad:
         else:
             # Get weights: only consider non-background classes
             # that are present in the current mask
-            present_classes_mask = INDIVIDUAL_POSITIVE_COUNTERS[1:][data['name']] > 0
+            present_classes_mask = INDIVIDUAL_POSITIVE_COUNTERS[data['name']][1:] > 0
             classes = CLASSES[1:][present_classes_mask]
             weights = TOTAL_POSITIVE_COUNTERS[1:][present_classes_mask]
             weights = 1 / weights
