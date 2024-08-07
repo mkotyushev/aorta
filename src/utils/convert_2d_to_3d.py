@@ -13,6 +13,10 @@ from timm.layers.trace_utils import _assert
 from timm.layers.norm_act import _create_act
 from timm.models.tiny_vit import TinyVitStage, TinyVitBlock, Attention as TinyVitAttention
 
+
+import src.model.offsets.offsets as offsets
+
+
 _int_tuple_3_t = Union[int, Tuple[int, int, int]]
 
 
@@ -555,16 +559,8 @@ class TinyVitAttention3d(torch.nn.Module):
         self.qkv = nn.Linear(dim, num_heads * (self.val_dim + 2 * key_dim))
         self.proj = nn.Linear(self.out_dim, dim)
 
-        points = list(itertools.product(range(resolution[0]), range(resolution[1]), range(resolution[2])))
-        N = len(points)
-        attention_offsets = {}
-        idxs = []
-        for p1 in points:
-            for p2 in points:
-                offset = (abs(p1[0] - p2[0]), abs(p1[1] - p2[1]), abs(p1[2] - p2[2]))
-                if offset not in attention_offsets:
-                    attention_offsets[offset] = len(attention_offsets)
-                idxs.append(attention_offsets[offset])
+        N = resolution[0] * resolution[1] * resolution[2]
+        attention_offsets, idxs = offsets.calculate_offsets_and_indices(*resolution)
         self.attention_biases = torch.nn.Parameter(torch.zeros(num_heads, len(attention_offsets)))
         self.register_buffer('attention_bias_idxs', torch.LongTensor(idxs).view(N, N), persistent=False)
         self.attention_bias_cache = {}
@@ -625,13 +621,7 @@ def map_tiny_vit_attention_biases_2d_to_3d(attention_biases_2d, resolution):
                 attention_offsets_2d[offset] = len(attention_offsets_2d)
     
     # Create 3D attention biases
-    points_3d = list(itertools.product(range(resolution[0]), range(resolution[1]), range(resolution[2])))
-    attention_offsets_3d = {}
-    for p1 in points_3d:
-        for p2 in points_3d:
-            offset = (abs(p1[0] - p2[0]), abs(p1[1] - p2[1]), abs(p1[2] - p2[2]))
-            if offset not in attention_offsets_3d:
-                attention_offsets_3d[offset] = len(attention_offsets_3d)
+    attention_offsets_3d = offsets.calculate_offsets(*resolution)
     attention_biases = torch.zeros(num_heads, len(attention_offsets_3d))
 
     # Map weights

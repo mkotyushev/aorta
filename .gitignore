@@ -3,4 +3,6 @@ lightning_logs/
 wandb/
 pipe/
 aorta/
+**/build/
+*.so
 *.csv
