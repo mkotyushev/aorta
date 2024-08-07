@@ -36,7 +36,7 @@ def build_and_save_dtm(mask_filepath, output_filepath, pad_size=(128, 128, 128))
         d = (d + 1.0) / 2.0
         dtm[i] = (d * 255.0).astype(np.uint8)
     np.save(output_filepath, dtm)
-    np.save(dtm_max, output_filepath.with_suffix('.max.npy'))
+    np.save(output_filepath.with_suffix('.max.npy'), dtm_max)
 
 
 def main(args):
