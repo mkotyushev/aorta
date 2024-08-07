@@ -56,10 +56,11 @@ class RandomCropPad:
             w_stop = min(w_start+self.shape[1], data['image'].shape[1])
             d_stop = min(d_start+self.shape[2], data['image'].shape[2])
         else:
-            # Get weights: only consider classes that are present in the current mask
-            present_classes_mask = INDIVIDUAL_POSITIVE_COUNTERS[data['name']] > 0
-            classes = CLASSES[present_classes_mask]
-            weights = TOTAL_POSITIVE_COUNTERS[present_classes_mask]
+            # Get weights: only consider non-background classes
+            # that are present in the current mask
+            present_classes_mask = INDIVIDUAL_POSITIVE_COUNTERS[1:][data['name']] > 0
+            classes = CLASSES[1:][present_classes_mask]
+            weights = TOTAL_POSITIVE_COUNTERS[1:][present_classes_mask]
             weights = 1 / weights
             weights /= weights.sum()
 

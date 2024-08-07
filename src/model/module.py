@@ -13,6 +13,7 @@ from unittest.mock import patch
 from src.utils.utils import state_norm, UnpatchifyMetrics
 from src.utils.convert_2d_to_3d import TimmUniversalEncoder3d
 from src.model.my_smp.deeplabv3_model import DeepLabV3Plus
+from src.data.constants import TOTAL_POSITIVE_COUNTERS
 
 
 logger = logging.getLogger(__name__)
@@ -351,6 +352,7 @@ class AortaModule(BaseModule):
         self,
         seg_arch: str,
         seg_kwargs: Dict[str, Any],
+        weighted_loss: bool = False,
         **base_kwargs,
     ):
         super().__init__(**base_kwargs)
@@ -380,10 +382,16 @@ class AortaModule(BaseModule):
             return None, None, logits
         
         mask = batch['mask']  # (B, H, W, D)
+        weight = None
+        if self.hparams.weighted_loss:
+            weight = torch.tensor(TOTAL_POSITIVE_COUNTERS).to(mask.device)
+            weight = 1 / weight
+            weight = weight / weight.sum()
         loss = torch.nn.functional.cross_entropy(
             logits,
             mask.long(),
             reduction='none',
+            weight=weight,
         ).mean()  # TODO: fix non-deterministic behavior if reduction is applied
 
         return loss, {'ce': loss}, logits
