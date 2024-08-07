@@ -4,7 +4,7 @@ trainer:
   strategy: auto
   devices: auto
   num_nodes: 1
-  precision: bf16-mixed
+  precision: 32
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
@@ -116,7 +116,7 @@ model:
   init_args:
     seg_arch: smp.Unet
     seg_kwargs:
-      encoder_name: tu-tiny_vit_5m_224.in1k
+      encoder_name: tu-tiny_vit_11m_224.dist_in22k_ft_in1k
       in_channels: 1
       classes: 24
       encoder_depth: 4
