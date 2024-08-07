@@ -22,7 +22,7 @@ def generalized_surface_loss(logits, mask, dtm, weights=None, type='multiclass',
     mask_onehot = F.one_hot(mask, num_classes=n_classes).float()  # (B, H, W, D, classes)
     mask_onehot = mask_onehot.permute(0, 4, 1, 2, 3)  # (B, classes, H, W, D)
 
-    num = (dtm * (1 - (mask_onehot + probas)) ** 2)  # (B, classes, H, W, D)
+    num = (dtm * (1 - (mask_onehot + probas))) ** 2  # (B, classes, H, W, D)
     num = num.sum(dim=(2, 3, 4))  # (B, classes)
     if weights is None:
         num = num.sum(1)  # (B,)
