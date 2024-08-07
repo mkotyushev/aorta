@@ -168,9 +168,10 @@ class AortaDataset:
         for name in names:
             image, _ = io.load(data_dirpath / 'images' / f'subject{name:03}_CTA.mha')
             mask, _ = io.load(data_dirpath / 'masks' / f'subject{name:03}_label.mha')
-            dtm = None
+            dtm, dtm_max = None, None
             if load_dtm:
                 dtm = np.load(data_dirpath / 'dtms' / f'subject{name:03}_label.npy')
+                dtm_max = np.load(data_dirpath / 'dtms' / f'subject{name:03}_label.max.npy')
 
             # DTM already cropped by mask when saved
             mask, image, _ = crop_by_positive(mask, image, dtm=None, margin=10, pad_size=pad_size)
@@ -207,6 +208,7 @@ class AortaDataset:
                 }
                 if dtm is not None:
                     item['dtm'] = dtm_patch
+                    item['dtm_max'] = dtm_max
                 self.data.append(item)
 
         self.patch_size = patch_size
