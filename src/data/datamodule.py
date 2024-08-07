@@ -15,6 +15,7 @@ class AortaDataModule(LightningDataModule):
         data_dirpath: Path,
         image_size: Tuple[int, int, int] = (128, 128, 32),
         num_samples: int = None,
+        weighted_crop: bool = False,
         debug: bool = False,
         batch_size: int = 4,
         num_workers: int = 0,
@@ -36,7 +37,7 @@ class AortaDataModule(LightningDataModule):
     def build_trainsforms(self) -> None:
         self.train_transform = Compose(
             [
-                RandomCropPad(self.hparams.image_size),
+                RandomCropPad(self.hparams.image_size, weighted=self.hparams.weighted_crop),
                 ConvertTypes(),
                 CenteredGaussianNoise(p=0.5), 
                 GridDistortion(p=0.5), 

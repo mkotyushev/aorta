@@ -1,6 +1,8 @@
 import numpy as np
 import random
 
+from src.data.constants import TOTAL_POSITIVE_COUNTERS, INDIVIDUAL_POSITIVE_COUNTERS, CLASSES
+
 
 class Compose:
     def __init__(self, transforms):
@@ -36,21 +38,48 @@ class NormalizeHu:
 
 
 class RandomCropPad:
-    def __init__(self, shape):
+    def __init__(self, shape, weighted=False):
         self.shape = shape
+        self.weighted = weighted
 
     def __call__(self, **data):
-        h_start, w_start, d_start = 0, 0, 0
-        if data['image'].shape[0] >= self.shape[0]:
-            h_start = random.randint(0, data['image'].shape[0] - self.shape[0])
-        if data['image'].shape[1] >= self.shape[1]:
-            w_start = random.randint(0, data['image'].shape[1] - self.shape[1])
-        if data['image'].shape[2] >= self.shape[2]:
-            d_start = random.randint(0, data['image'].shape[2] - self.shape[2])
+        if not self.weighted:
+            h_start, w_start, d_start = 0, 0, 0
+            if data['image'].shape[0] >= self.shape[0]:
+                h_start = random.randint(0, data['image'].shape[0] - self.shape[0])
+            if data['image'].shape[1] >= self.shape[1]:
+                w_start = random.randint(0, data['image'].shape[1] - self.shape[1])
+            if data['image'].shape[2] >= self.shape[2]:
+                d_start = random.randint(0, data['image'].shape[2] - self.shape[2])
 
-        h_stop = min(h_start+self.shape[0], data['image'].shape[0])
-        w_stop = min(w_start+self.shape[1], data['image'].shape[1])
-        d_stop = min(d_start+self.shape[2], data['image'].shape[2])
+            h_stop = min(h_start+self.shape[0], data['image'].shape[0])
+            w_stop = min(w_start+self.shape[1], data['image'].shape[1])
+            d_stop = min(d_start+self.shape[2], data['image'].shape[2])
+        else:
+            # Get weights: only consider classes that are present in the current mask
+            present_classes_mask = INDIVIDUAL_POSITIVE_COUNTERS[data['name']] > 0
+            classes = CLASSES[present_classes_mask]
+            weights = TOTAL_POSITIVE_COUNTERS[present_classes_mask]
+            weights = 1 / weights
+            weights /= weights.sum()
+
+            # Get random class
+            random_class = random.choices(classes, weights)[0]
+
+            # Get center as random indices inside the mask of selected class
+            mask_to_sample_from = data['mask'] == random_class
+            nonzero = np.nonzero(mask_to_sample_from)
+            n_nonzero = len(nonzero[0])
+            random_nonzero_index = random.randint(0, n_nonzero - 1)
+            h_center, w_center, d_center = [nonzero[i][random_nonzero_index] for i in range(3)]
+
+            # Get crop indices
+            h_start = max(0, h_center - self.shape[0] // 2)
+            w_start = max(0, w_center - self.shape[1] // 2)
+            d_start = max(0, d_center - self.shape[2] // 2)
+            h_stop = min(h_start + self.shape[0], data['image'].shape[0])
+            w_stop = min(w_start + self.shape[1], data['image'].shape[1])
+            d_stop = min(d_start + self.shape[2], data['image'].shape[2])
 
         data['image'] = data['image'][h_start:h_stop, w_start:w_stop, d_start:d_stop]
         data['mask'] = data['mask'][h_start:h_stop, w_start:w_stop, d_start:d_stop]
