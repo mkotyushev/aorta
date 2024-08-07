@@ -4,7 +4,7 @@ trainer:
   strategy: auto
   devices: auto
   num_nodes: 1
-  precision: 32
+  precision: bf16-mixed
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
