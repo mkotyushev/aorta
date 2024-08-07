@@ -69,7 +69,7 @@ class AortaDataModule(LightningDataModule):
                     transform=self.val_transform,
                     patch_size=self.hparams.image_size,
                     pad_size=self.hparams.image_size,
-                    load_dtm=False,  # Only need to load DTM for training
+                    load_dtm=self.hparams.load_dtm,
                 )
         elif stage == 'test' and self.test_dataset is None:
             # TODO: undo cropping and padding for test dataset
@@ -79,7 +79,7 @@ class AortaDataModule(LightningDataModule):
                 transform=self.test_transform,
                 patch_size=self.hparams.image_size,
                 pad_size=self.hparams.image_size,
-                load_dtm=False,  # Only need to load DTM for training
+                load_dtm=self.hparams.load_dtm,
             )
         
     def train_dataloader(self) -> DataLoader:
