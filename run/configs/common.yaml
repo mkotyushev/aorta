@@ -116,7 +116,7 @@ model:
   init_args:
     seg_arch: smp.Unet
     seg_kwargs:
-      encoder_name: tu-tiny_vit_11m_224.dist_in22k_ft_in1k
+      encoder_name: tu-tiny_vit_21m_224.dist_in22k_ft_in1k
       in_channels: 1
       classes: 24
       encoder_depth: 4
