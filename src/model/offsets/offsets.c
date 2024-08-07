@@ -48,8 +48,10 @@ static PyObject* calculate_offsets_and_indices(PyObject* self, PyObject* args) {
     }
     
     PyObject* offset_dict = PyDict_New();
-    PyObject* idxs_list = PyList_New(0);
+    Py_ssize_t total_points = (Py_ssize_t)res_x * res_y * res_z * res_x * res_y * res_z; // Total number of point pairs
+    PyObject* idxs_list = PyList_New(total_points);
     
+    Py_ssize_t idx_count = 0;
     for (int x1 = 0; x1 < res_x; x1++) {
         for (int y1 = 0; y1 < res_y; y1++) {
             for (int z1 = 0; z1 < res_z; z1++) {
@@ -71,7 +73,8 @@ static PyObject* calculate_offsets_and_indices(PyObject* self, PyObject* args) {
                             } else {
                                 idx = PyDict_GetItem(offset_dict, offset_tuple);
                             }
-                            PyList_Append(idxs_list, idx);
+                            Py_INCREF(idx); // Increase ref count since GetItem returns a borrowed reference
+                            PyList_SET_ITEM(idxs_list, idx_count++, idx);
                             Py_DECREF(offset_tuple);
                         }
                     }
