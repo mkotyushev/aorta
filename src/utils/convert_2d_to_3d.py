@@ -1,15 +1,17 @@
+import itertools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import types
 import timm
-from typing import Tuple, Union, List, Optional
+from typing import Tuple, Union, List, Optional, Dict
 from enum import Enum
-from timm.layers import LayerNorm2d, SelectAdaptivePool2d, BatchNormAct2d, Conv2dSame, fast_layer_norm, is_fast_norm, get_same_padding
+from timm.layers import LayerNorm2d, SelectAdaptivePool2d, BatchNormAct2d, Conv2dSame, fast_layer_norm, is_fast_norm, get_same_padding, use_fused_attn
 from timm.layers.grn import GlobalResponseNorm
 from timm.models.convnext import ConvNeXtBlock
 from timm.layers.trace_utils import _assert
 from timm.layers.norm_act import _create_act
+from timm.models.tiny_vit import TinyVitStage, TinyVitBlock, Attention as TinyVitAttention
 
 _int_tuple_3_t = Union[int, Tuple[int, int, int]]
 
@@ -470,6 +472,179 @@ def ConvNeXtBlock_forward_3d(self, x):
     return x
 
 
+def TinyVitStage_forward_3d(self, x):
+    x = self.downsample(x)
+    x = x.permute(0, 2, 3, 4, 1)  # BCL -> BLC
+    x = self.blocks(x)
+    x = x.permute(0, 4, 1, 2, 3)  # BLC -> BCL
+
+    return x
+
+
+def TinyVitBlock_forward_3d(self, x):
+    B, H, W, D, C = x.shape
+    L = H * W * D
+
+    shortcut = x
+    if H == self.window_size and W == self.window_size and D == self.window_size:
+        x = x.reshape(B, L, C)
+        x = self.attn(x)
+        x = x.view(B, H, W, D, C)
+    else:
+        pad_b = (self.window_size - H % self.window_size) % self.window_size
+        pad_r = (self.window_size - W % self.window_size) % self.window_size
+        pad_f = (self.window_size - D % self.window_size) % self.window_size
+
+        padding = pad_b > 0 or pad_r > 0 or pad_f > 0
+        if padding:
+            x = F.pad(x, (0, 0, 0, pad_f, 0, pad_r, 0, pad_b))
+
+        # window partition
+        pH, pW, pD = H + pad_b, W + pad_r, D + pad_f
+        nH = pH // self.window_size
+        nW = pW // self.window_size
+        nD = pD // self.window_size
+
+        # 0, 1, 2, 3, 4, 5, 6, 7
+        x = x.view(B, nH, self.window_size, nW, self.window_size, nD, self.window_size, C).permute((0, 1, 3, 5, 2, 4, 6, 7)).reshape(
+            B * nH * nW * nD, self.window_size * self.window_size * self.window_size, C
+        )
+
+        x = self.attn(x)
+
+        # window reverse
+        x = x.view(B, nH, nW, nD, self.window_size, self.window_size, self.window_size, C).permute((0, 1, 4, 2, 5, 3, 6, 7)).reshape(B, pH, pW, pD, C)
+
+        if padding:
+            x = x[:, :H, :W, :D].contiguous()
+
+    x = shortcut + self.drop_path1(x)
+
+    x = x.permute(0, 4, 1, 2, 3)
+    x = self.local_conv(x)
+    x = x.reshape(B, C, L).transpose(1, 2)
+
+    x = x + self.drop_path2(self.mlp(x))
+    return x.view(B, H, W, D, C)
+
+
+class TinyVitAttention3d(torch.nn.Module):
+    fused_attn: torch.jit.Final[bool]
+    attention_bias_cache: Dict[str, torch.Tensor]
+
+    def __init__(
+            self,
+            dim,
+            key_dim,
+            num_heads=8,
+            attn_ratio=4,
+            resolution=(14, 14, 14),
+    ):
+        super().__init__()
+        assert isinstance(resolution, tuple) and len(resolution) == 3
+        self.num_heads = num_heads
+        self.scale = key_dim ** -0.5
+        self.key_dim = key_dim
+        self.val_dim = int(attn_ratio * key_dim)
+        self.out_dim = self.val_dim * num_heads
+        self.attn_ratio = attn_ratio
+        self.resolution = resolution
+        self.fused_attn = use_fused_attn()
+
+        self.norm = nn.LayerNorm(dim)
+        self.qkv = nn.Linear(dim, num_heads * (self.val_dim + 2 * key_dim))
+        self.proj = nn.Linear(self.out_dim, dim)
+
+        points = list(itertools.product(range(resolution[0]), range(resolution[1]), range(resolution[2])))
+        N = len(points)
+        attention_offsets = {}
+        idxs = []
+        for p1 in points:
+            for p2 in points:
+                offset = (abs(p1[0] - p2[0]), abs(p1[1] - p2[1]), abs(p1[2] - p2[2]))
+                if offset not in attention_offsets:
+                    attention_offsets[offset] = len(attention_offsets)
+                idxs.append(attention_offsets[offset])
+        self.attention_biases = torch.nn.Parameter(torch.zeros(num_heads, len(attention_offsets)))
+        self.register_buffer('attention_bias_idxs', torch.LongTensor(idxs).view(N, N), persistent=False)
+        self.attention_bias_cache = {}
+
+    @torch.no_grad()
+    def train(self, mode=True):
+        super().train(mode)
+        if mode and self.attention_bias_cache:
+            self.attention_bias_cache = {}  # clear ab cache
+
+    def get_attention_biases(self, device: torch.device) -> torch.Tensor:
+        if torch.jit.is_tracing() or self.training:
+            return self.attention_biases[:, self.attention_bias_idxs]
+        else:
+            device_key = str(device)
+            if device_key not in self.attention_bias_cache:
+                self.attention_bias_cache[device_key] = self.attention_biases[:, self.attention_bias_idxs]
+            return self.attention_bias_cache[device_key]
+
+    def forward(self, x):
+        attn_bias = self.get_attention_biases(x.device)
+        B, N, _ = x.shape
+        # Normalization
+        x = self.norm(x)
+        qkv = self.qkv(x)
+        # (B, N, num_heads, d)
+        q, k, v = qkv.view(B, N, self.num_heads, -1).split([self.key_dim, self.key_dim, self.val_dim], dim=3)
+        # (B, num_heads, N, d)
+        q = q.permute(0, 2, 1, 3)
+        k = k.permute(0, 2, 1, 3)
+        v = v.permute(0, 2, 1, 3)
+
+        if self.fused_attn:
+            x = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_bias)
+        else:
+            q = q * self.scale
+            attn = q @ k.transpose(-2, -1)
+            attn = attn + attn_bias
+            attn = attn.softmax(dim=-1)
+            x = attn @ v
+        x = x.transpose(1, 2).reshape(B, N, self.out_dim)
+        x = self.proj(x)
+        return x
+
+
+def map_tiny_vit_attention_biases_2d_to_3d(attention_biases_2d, resolution):
+    assert all(r == resolution[0] for r in resolution)
+
+    num_heads = attention_biases_2d.shape[0]
+
+    # Get 2D offest to index mapping
+    points_2d = list(itertools.product(range(resolution[0]), range(resolution[1])))
+    attention_offsets_2d = {}
+    for p1 in points_2d:
+        for p2 in points_2d:
+            offset = (abs(p1[0] - p2[0]), abs(p1[1] - p2[1]))
+            if offset not in attention_offsets_2d:
+                attention_offsets_2d[offset] = len(attention_offsets_2d)
+    
+    # Create 3D attention biases
+    points_3d = list(itertools.product(range(resolution[0]), range(resolution[1]), range(resolution[2])))
+    attention_offsets_3d = {}
+    for p1 in points_3d:
+        for p2 in points_3d:
+            offset = (abs(p1[0] - p2[0]), abs(p1[1] - p2[1]), abs(p1[2] - p2[2]))
+            if offset not in attention_offsets_3d:
+                attention_offsets_3d[offset] = len(attention_offsets_3d)
+    attention_biases = torch.zeros(num_heads, len(attention_offsets_3d))
+
+    # Map weights
+    for offset, index in attention_offsets_3d.items():
+        attention_biases[:, index] = (
+            attention_biases_2d[:, attention_offsets_2d[(offset[0], offset[1])]] +
+            attention_biases_2d[:, attention_offsets_2d[(offset[1], offset[2])]] +
+            attention_biases_2d[:, attention_offsets_2d[(offset[0], offset[2])]]
+        ) / 3
+
+    return attention_biases
+
+
 def repeat_last_size(size, ndim):
     if isinstance(size, int):
         return (size, ) * ndim
@@ -506,6 +681,19 @@ def convert_2d_to_3d(layer):
             )
             if child_layer.bias is not None:
                 new_child_layer.bias = child_layer.bias
+        elif isinstance(child_layer, nn.BatchNorm2d):
+            new_child_layer = nn.BatchNorm3d(
+                num_features=child_layer.num_features, 
+                eps=child_layer.eps, 
+                momentum=child_layer.momentum, 
+                affine=child_layer.affine, 
+                track_running_stats=child_layer.track_running_stats
+            )
+            new_child_layer.weight = child_layer.weight
+            new_child_layer.bias = child_layer.bias
+            new_child_layer.running_mean = child_layer.running_mean
+            new_child_layer.running_var = child_layer.running_var
+            new_child_layer.num_batches_tracked = child_layer.num_batches_tracked
         elif isinstance(child_layer, LayerNorm2d):
             new_child_layer = LayerNorm3d(
                 num_channels=child_layer.normalized_shape, 
@@ -550,10 +738,30 @@ def convert_2d_to_3d(layer):
                 flatten=isinstance(child_layer.pool, nn.Flatten),
                 input_fmt=input_fmt,
             )
+        elif isinstance(child_layer, TinyVitAttention):
+            resolution = repeat_last_size(child_layer.resolution, ndim=3)
+            new_child_layer = TinyVitAttention3d(
+                dim=child_layer.norm.normalized_shape[0], 
+                key_dim=child_layer.key_dim, 
+                num_heads=child_layer.num_heads, 
+                attn_ratio=child_layer.attn_ratio, 
+                resolution=resolution,
+            )
+            new_child_layer.norm = child_layer.norm
+            new_child_layer.qkv = child_layer.qkv
+            new_child_layer.proj = child_layer.proj
+            new_child_layer.attention_biases = torch.nn.Parameter(
+                map_tiny_vit_attention_biases_2d_to_3d(child_layer.attention_biases, resolution),
+                requires_grad=child_layer.attention_biases.requires_grad
+            )
         else:
             # TODO: move to context manager
             if isinstance(child_layer, ConvNeXtBlock):
                 setattr(child_layer, 'forward', types.MethodType(ConvNeXtBlock_forward_3d, child_layer))
+            elif isinstance(child_layer, TinyVitStage):
+                setattr(child_layer, 'forward', types.MethodType(TinyVitStage_forward_3d, child_layer))
+            elif isinstance(child_layer, TinyVitBlock):
+                setattr(child_layer, 'forward', types.MethodType(TinyVitBlock_forward_3d, child_layer))
             convert_2d_to_3d(child_layer)
 
         if new_child_layer is not None:
