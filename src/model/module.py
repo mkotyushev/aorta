@@ -385,9 +385,9 @@ class AortaModule(BaseModule):
         weight = None
         if self.hparams.weighted_loss:
             weight = torch.tensor(TOTAL_POSITIVE_COUNTERS).to(mask.device)
-            weight[0] = weight[1:].sum()  # Baskground = sum of all other classes
             weight = 1 / weight
-            weight = weight / weight.sum()
+            weight[0] = 1 / weight.shape[0]
+            weight[1:] = weight[1:] / weight[1:].sum()
         loss = torch.nn.functional.cross_entropy(
             logits,
             mask.long(),
