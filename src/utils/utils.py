@@ -230,8 +230,15 @@ class UnpatchifyMetrics:
         self.weights[self.weights == 0] = 1
         self.preds /= self.weights
 
-        # One-hot
+        # Argmax
         self.preds = torch.argmax(self.preds, dim=0)
+        
+        # Save predictions
+        if self.save_dirpath is not None:
+            preds_to_save = self.preds.cpu().numpy().astype(np.int16)
+            save(preds_to_save, self.save_dirpath / f'{self.name}.mha', use_compression=True)
+
+        # One-hot
         self.preds = one_hot_embedding(
             self.preds, 
             num_classes=self.n_classes
@@ -240,11 +247,6 @@ class UnpatchifyMetrics:
             self.masks, 
             num_classes=self.n_classes
         ).permute(3, 0, 1, 2).unsqueeze(0)
-
-        # Save predictions
-        if self.save_dirpath is not None:
-            preds_to_save = self.preds.cpu().numpy().astype(np.int16)
-            save(preds_to_save, self.save_dirpath / f'{self.name}.mha', use_compression=True)
 
         # Calculate metrics
         for metric in self.metrics.values():
