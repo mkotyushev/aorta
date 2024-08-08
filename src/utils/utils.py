@@ -1,5 +1,7 @@
 import gc
 import torch
+import numpy as np
+import scipy
 from typing import Dict, Optional, Union, Any, Tuple
 from lightning import Trainer
 from lightning.pytorch.cli import LightningCLI
@@ -149,6 +151,33 @@ def one_hot_embedding(labels, num_classes):
     return y[labels] 
 
 
+# https://github.com/bnsreenu/python_for_microscopists/blob/master/
+# 229_smooth_predictions_by_blending_patches/smooth_tiled_predictions.py
+def spline_window(window_size, power=2):
+    """
+    Squared spline (power=2) window function:
+    https://www.wolframalpha.com/input/?i=y%3Dx**2,+y%3D-(x-2)**2+%2B2,+y%3D(x-4)**2,+from+y+%3D+0+to+2
+    """
+    intersection = int(window_size / 4)
+    wind_outer = (abs(2*(scipy.signal.triang(window_size))) ** power)/2
+    wind_outer[intersection:-intersection] = 0
+
+    wind_inner = 1 - (abs(2*(scipy.signal.triang(window_size) - 1)) ** power)/2
+    wind_inner[:intersection] = 0
+    wind_inner[-intersection:] = 0
+
+    wind = wind_inner + wind_outer
+    wind = wind / np.average(wind)
+    return wind
+
+
+def spline_window_3d(h, w, d, power=2):
+    h_wind = spline_window(h, power)
+    w_wind = spline_window(w, power)
+    d_wind = spline_window(d, power)
+    return h_wind[:, None, None] * w_wind[None, :, None] * d_wind[None, None, :] 
+
+
 class UnpatchifyMetrics:
     """Unpatchify predictions to original full image assuming the dataloader is sequential
     and calculate the metrics for each full image, then aggregate them.
@@ -161,6 +190,7 @@ class UnpatchifyMetrics:
         self.weigths = None
         self.masks = None
         self.original_shape = None 
+        self.weight_kernel = None
 
     def _reset_current(self):
         self.name = None
@@ -168,6 +198,7 @@ class UnpatchifyMetrics:
         self.weights = None
         self.masks = None
         self.original_shape = None 
+        self.weight_kernel = None
 
         # Cleanup heavy tensors
         gc.collect()
@@ -215,6 +246,7 @@ class UnpatchifyMetrics:
         name: str, 
         padded_shape: Tuple[int, int, int], 
         original_shape: Tuple[int, int, int],
+        patch_shape: Tuple[int, int, int],
         device: torch.device = torch.device('cpu'),
     ):
         self.name = name
@@ -222,6 +254,9 @@ class UnpatchifyMetrics:
         self.weights = torch.zeros((self.n_classes, *padded_shape), dtype=torch.float32, device=device)
         self.masks = torch.zeros(padded_shape, dtype=torch.int32, device=device)
         self.original_shape = original_shape
+        self.weight_kernel = torch.from_numpy(
+            spline_window_3d(*patch_shape, power=2)
+        )
 
     def update(self, batch: Dict[str, Any]):
         """Update the metrics with the predictions and masks of the batch.
@@ -242,10 +277,16 @@ class UnpatchifyMetrics:
                 if self.name is not None:
                     self._calculate_metrics()
                     self._reset_current()
+                patch_shape = (
+                    batch['indices'][i][0][1] - batch['indices'][i][0][0],
+                    batch['indices'][i][1][1] - batch['indices'][i][1][0],
+                    batch['indices'][i][2][1] - batch['indices'][i][2][0],
+                )
                 self._init(
                     name, 
                     batch['padded_shape'][i], 
                     batch['original_shape'][i],
+                    patch_shape,
                     device=batch['mask'].device,
                 )
             self.preds[
@@ -253,13 +294,13 @@ class UnpatchifyMetrics:
                 batch['indices'][i][0][0]:batch['indices'][i][0][1],
                 batch['indices'][i][1][0]:batch['indices'][i][1][1],
                 batch['indices'][i][2][0]:batch['indices'][i][2][1],
-            ] += batch['pred'][i]
+            ] += (batch['pred'][i] * self.weight_kernel[None, ...])
             self.weights[
                 :,
                 batch['indices'][i][0][0]:batch['indices'][i][0][1],
                 batch['indices'][i][1][0]:batch['indices'][i][1][1],
                 batch['indices'][i][2][0]:batch['indices'][i][2][1],
-            ] += 1  # TODO implement different weighting
+            ] += self.weight_kernel[None, ...]
             self.masks[
                 batch['indices'][i][0][0]:batch['indices'][i][0][1],
                 batch['indices'][i][1][0]:batch['indices'][i][1][1],
