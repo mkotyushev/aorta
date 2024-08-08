@@ -220,6 +220,11 @@ class UnpatchifyMetrics:
             :self.original_shape[1], 
             :self.original_shape[2]
         ]
+        self.weights = self.weights[
+            :self.original_shape[0], 
+            :self.original_shape[1], 
+            :self.original_shape[2]
+        ]
         self.masks = self.masks[
             :self.original_shape[0], 
             :self.original_shape[1], 
@@ -228,7 +233,7 @@ class UnpatchifyMetrics:
 
         # Weighted average
         self.weights[self.weights == 0] = 1
-        self.preds /= self.weights
+        self.preds /= self.weights[None, ...]
 
         # Argmax
         self.preds = torch.argmax(self.preds, dim=0)
@@ -262,7 +267,7 @@ class UnpatchifyMetrics:
     ):
         self.name = name
         self.preds = torch.zeros((self.n_classes, *padded_shape), dtype=torch.float32, device=device)
-        self.weights = torch.zeros((self.n_classes, *padded_shape), dtype=torch.float32, device=device)
+        self.weights = torch.zeros(padded_shape, dtype=torch.float32, device=device)
         self.masks = torch.zeros(padded_shape, dtype=torch.int32, device=device)
         self.original_shape = original_shape
         self.weight_kernel = torch.from_numpy(
@@ -307,11 +312,10 @@ class UnpatchifyMetrics:
                 batch['indices'][i][2][0]:batch['indices'][i][2][1],
             ] += (batch['pred'][i] * self.weight_kernel[None, ...])
             self.weights[
-                :,
                 batch['indices'][i][0][0]:batch['indices'][i][0][1],
                 batch['indices'][i][1][0]:batch['indices'][i][1][1],
                 batch['indices'][i][2][0]:batch['indices'][i][2][1],
-            ] += self.weight_kernel[None, ...]
+            ] += self.weight_kernel
             self.masks[
                 batch['indices'][i][0][0]:batch['indices'][i][0][1],
                 batch['indices'][i][1][0]:batch['indices'][i][1][1],
