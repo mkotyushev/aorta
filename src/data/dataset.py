@@ -55,7 +55,7 @@ def generate_patches_3d(
                 padded_shape.append(original_shape[i])
             else:
                 padded_shape.append(
-                    (original_shape[i] - patch_size[i]) // step_size[i] * step_size[i] + patch_size[i]
+                    ((original_shape[i] - patch_size[i]) // step_size[i] + 1) * step_size[i] + patch_size[i]
                 )
         padded_shape = tuple(padded_shape)
 
