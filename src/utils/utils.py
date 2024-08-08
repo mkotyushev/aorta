@@ -2,6 +2,7 @@ import gc
 import torch
 import numpy as np
 import scipy
+from medpy.io import save
 from typing import Dict, Optional, Union, Any, Tuple
 from lightning import Trainer
 from lightning.pytorch.cli import LightningCLI
@@ -182,9 +183,12 @@ class UnpatchifyMetrics:
     """Unpatchify predictions to original full image assuming the dataloader is sequential
     and calculate the metrics for each full image, then aggregate them.
     """
-    def __init__(self, n_classes, metrics):
+    def __init__(self, n_classes, metrics, save_dirpath):
         self.n_classes = n_classes
         self.metrics = metrics
+        self.save_dirpath = save_dirpath
+        if self.save_dirpath is not None:
+            self.save_dirpath.mkdir(parents=True, exist_ok=True)
         self.name = None
         self.preds = None
         self.weigths = None
@@ -236,6 +240,11 @@ class UnpatchifyMetrics:
             self.masks, 
             num_classes=self.n_classes
         ).permute(3, 0, 1, 2).unsqueeze(0)
+
+        # Save predictions
+        if self.save_dirpath is not None:
+            preds_to_save = self.preds.cpu().numpy().astype(np.int16)
+            save(preds_to_save, self.save_dirpath / f'{self.name}.mha', use_compression=True)
 
         # Calculate metrics
         for metric in self.metrics.values():

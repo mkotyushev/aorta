@@ -122,6 +122,7 @@ model:
       encoder_depth: 5
       decoder_channels: [256, 128, 64, 32, 16]
       strides: [[2, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]]
+    preds_save_dirpath: null
     optimizer_init:
       class_path: torch.optim.AdamW
       init_args:

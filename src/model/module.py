@@ -9,6 +9,7 @@ from torch import Tensor
 from lightning.pytorch.cli import instantiate_class
 from lightning.pytorch.utilities import grad_norm
 from unittest.mock import patch
+from pathlib import Path
 
 from src.utils.utils import state_norm, UnpatchifyMetrics
 from src.utils.convert_2d_to_3d import TimmUniversalEncoder3d
@@ -380,6 +381,7 @@ class AortaModule(BaseModule):
         self,
         seg_arch: str,
         seg_kwargs: Dict[str, Any],
+        preds_save_dirpath: Path | None = None,
         **base_kwargs,
     ):
         super().__init__(**base_kwargs)
@@ -435,6 +437,7 @@ class AortaModule(BaseModule):
                             class_thresholds=class_thresholds
                         )
                     },
+                    save_dirpath=self.hparams.preds_save_dirpath,
                 ),
             },
             'val': {
@@ -451,6 +454,7 @@ class AortaModule(BaseModule):
                             class_thresholds=class_thresholds
                         )
                     },
+                    save_dirpath=self.hparams.preds_save_dirpath,
                 ),
             }
         }
