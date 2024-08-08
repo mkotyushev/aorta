@@ -160,6 +160,22 @@ class BaseModule(LightningModule):
             )
         self.update_metrics('val', preds, batch)
         return total_loss
+    
+    def test_step(self, batch: Tensor, batch_idx: int, dataloader_idx: Optional[int] = None, **kwargs) -> Tensor:
+        total_loss, losses, preds = self.compute_loss_preds(batch, **kwargs)
+        assert dataloader_idx is None or dataloader_idx == 0, 'Only one test dataloader is supported.'
+        for loss_name, loss in losses.items():
+            self.log(
+                f'test_loss_{loss_name}', 
+                loss,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                add_dataloader_idx=False,
+                batch_size=batch['image'].shape[0],
+            )
+        self.update_metrics('test', preds, batch)
+        return total_loss
 
     def predict_step(self, batch: Tensor, batch_idx: int, dataloader_idx: Optional[int] = None, **kwargs) -> Tensor:
         _, _, preds = self.compute_loss_preds(batch, **kwargs)
@@ -217,6 +233,19 @@ class BaseModule(LightningModule):
 
         self.log_metrics_and_reset(
             'val',
+            on_step=False,
+            on_epoch=True,
+            prog_bar_names=self.hparams.prog_bar_names,
+            reset=True,
+        )
+
+    def on_test_epoch_end(self) -> None:
+        """Called in the validation loop at the very end of the epoch."""
+        if self.metrics is None:
+            return
+
+        self.log_metrics_and_reset(
+            'test',
             on_step=False,
             on_epoch=True,
             prog_bar_names=self.hparams.prog_bar_names,
@@ -392,6 +421,22 @@ class AortaModule(BaseModule):
         """Configure task-specific metrics."""
         class_thresholds = [0.5] * (24 - 1) # Excluding background
         self.metrics = {
+            'test': {
+                'dice+nsd': UnpatchifyMetrics(
+                    n_classes=24,
+                    metrics={
+                        'dice': DiceMetric(
+                            include_background=False, 
+                            reduction="mean", 
+                            get_not_nans=False
+                        ),
+                        'nsd': SurfaceDiceMetric(
+                            include_background=False, 
+                            class_thresholds=class_thresholds
+                        )
+                    },
+                ),
+            },
             'val': {
                 'dice+nsd': UnpatchifyMetrics(
                     n_classes=24,
