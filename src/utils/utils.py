@@ -240,7 +240,7 @@ class UnpatchifyMetrics:
         
         # Save predictions
         if self.save_dirpath is not None:
-            preds_to_save = self.preds.cpu().numpy().astype(np.int16)
+            preds_to_save = self.preds.to(torch.int16).cpu().numpy()
             save(preds_to_save, self.save_dirpath / f'{self.name}.mha', use_compression=True)
 
         # One-hot
