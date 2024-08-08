@@ -146,7 +146,9 @@ class AortaDataset:
         patch_size: Tuple[int, int, int] | None = None, 
         pad_size: Tuple[int, int, int] | None = None,
     ):
-        step_size = None if patch_size is None else patch_size
+        if patch_size is not None:
+            assert all(p % 2 == 0 for p in patch_size)
+        step_size = None if patch_size is None else tuple(p // 2 for p in patch_size)
 
         self.data = []
         for name in names:
