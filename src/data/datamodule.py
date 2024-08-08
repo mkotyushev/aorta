@@ -60,6 +60,7 @@ class AortaDataModule(LightningDataModule):
                     names=SPLIT_TO_NAMES['train'] if not self.hparams.debug else SPLIT_TO_NAMES['train'][:5],
                     transform=self.train_transform,
                     pad_size=self.hparams.image_size,
+                    cbp_margin=10,
                 )
             if stage in ['fit', 'validate'] and self.val_dataset is None:
                 self.val_dataset = AortaDataset(
@@ -68,6 +69,7 @@ class AortaDataModule(LightningDataModule):
                     transform=self.val_transform,
                     patch_size=self.hparams.image_size,
                     pad_size=self.hparams.image_size,
+                    cbp_margin=None,
                 )
         elif stage == 'test' and self.test_dataset is None:
             # TODO: undo cropping and padding for test dataset
@@ -77,6 +79,7 @@ class AortaDataModule(LightningDataModule):
                 transform=self.test_transform,
                 patch_size=self.hparams.image_size,
                 pad_size=self.hparams.image_size,
+                cbp_margin=None,
             )
         
     def train_dataloader(self) -> DataLoader:

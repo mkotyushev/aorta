@@ -145,6 +145,7 @@ class AortaDataset:
         transform: Optional[Callable] = None,
         patch_size: Tuple[int, int, int] | None = None, 
         pad_size: Tuple[int, int, int] | None = None,
+        cbp_margin: int | None = None,
     ):
         if patch_size is not None:
             assert all(p % 2 == 0 for p in patch_size)
@@ -155,7 +156,8 @@ class AortaDataset:
             image, _ = io.load(data_dirpath / 'images' / f'subject{name:03}_CTA.mha')
             mask, _ = io.load(data_dirpath / 'masks' / f'subject{name:03}_label.mha')
 
-            image, mask = crop_by_positive(image, mask, margin=10, pad_size=pad_size)
+            if cbp_margin is not None:
+                image, mask = crop_by_positive(image, mask, margin=cbp_margin, pad_size=pad_size)
             print(f'Loaded {name}, image shape: {image.shape}, mask shape: {mask.shape}')
 
             for (
