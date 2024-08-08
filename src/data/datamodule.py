@@ -15,6 +15,7 @@ class AortaDataModule(LightningDataModule):
         data_dirpath: Path,
         image_size: Tuple[int, int, int] = (128, 128, 32),
         num_samples: int = None,
+        val_test_cbp_margin: int = 10,
         debug: bool = False,
         batch_size: int = 4,
         num_workers: int = 0,
@@ -69,7 +70,7 @@ class AortaDataModule(LightningDataModule):
                     transform=self.val_transform,
                     patch_size=self.hparams.image_size,
                     pad_size=self.hparams.image_size,
-                    cbp_margin=None,
+                    cbp_margin=self.hparams.val_test_cbp_margin,
                 )
         elif stage == 'test' and self.test_dataset is None:
             # TODO: undo cropping and padding for test dataset
@@ -79,7 +80,7 @@ class AortaDataModule(LightningDataModule):
                 transform=self.test_transform,
                 patch_size=self.hparams.image_size,
                 pad_size=self.hparams.image_size,
-                cbp_margin=None,
+                cbp_margin=self.hparams.val_test_cbp_margin,
             )
         
     def train_dataloader(self) -> DataLoader:
