@@ -158,12 +158,14 @@ class UnpatchifyMetrics:
         self.metrics = metrics
         self.name = None
         self.preds = None
+        self.weigths = None
         self.masks = None
         self.original_shape = None 
 
     def _reset_current(self):
         self.name = None
         self.preds = None
+        self.weights = None
         self.masks = None
         self.original_shape = None 
 
@@ -178,6 +180,7 @@ class UnpatchifyMetrics:
     def _calculate_metrics(self):
         # Remove padding
         self.preds = self.preds[
+            :,
             :self.original_shape[0], 
             :self.original_shape[1], 
             :self.original_shape[2]
@@ -188,7 +191,12 @@ class UnpatchifyMetrics:
             :self.original_shape[2]
         ]
 
+        # Weighted average
+        self.weights[self.weights == 0] = 1
+        self.preds /= self.weights
+
         # One-hot
+        self.preds = torch.argmax(self.preds, dim=0)
         self.preds = one_hot_embedding(
             self.preds, 
             num_classes=self.n_classes
@@ -210,7 +218,8 @@ class UnpatchifyMetrics:
         device: torch.device = torch.device('cpu'),
     ):
         self.name = name
-        self.preds = torch.zeros(padded_shape, dtype=torch.int32, device=device)
+        self.preds = torch.zeros((self.n_classes, *padded_shape), dtype=torch.float32, device=device)
+        self.weights = torch.zeros((self.n_classes, *padded_shape), dtype=torch.float32, device=device)
         self.masks = torch.zeros(padded_shape, dtype=torch.int32, device=device)
         self.original_shape = original_shape
 
@@ -224,7 +233,6 @@ class UnpatchifyMetrics:
             - 'pred': FloatTensor[B, C, H, W, D], probabilities
             - 'mask': LongTensor[B, H, W, D], ground truth
         """
-        batch['pred'] = batch['pred'].argmax(dim=1).to(torch.int32)
         batch['mask'] = batch['mask'].to(torch.int32)
 
         B = batch['mask'].shape[0]
@@ -241,10 +249,17 @@ class UnpatchifyMetrics:
                     device=batch['mask'].device,
                 )
             self.preds[
+                :,
                 batch['indices'][i][0][0]:batch['indices'][i][0][1],
                 batch['indices'][i][1][0]:batch['indices'][i][1][1],
                 batch['indices'][i][2][0]:batch['indices'][i][2][1],
-            ] = batch['pred'][i]
+            ] += batch['pred'][i]
+            self.weights[
+                :,
+                batch['indices'][i][0][0]:batch['indices'][i][0][1],
+                batch['indices'][i][1][0]:batch['indices'][i][1][1],
+                batch['indices'][i][2][0]:batch['indices'][i][2][1],
+            ] += 1  # TODO implement different weighting
             self.masks[
                 batch['indices'][i][0][0]:batch['indices'][i][0][1],
                 batch['indices'][i][1][0]:batch['indices'][i][1][1],
