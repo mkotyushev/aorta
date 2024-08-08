@@ -323,6 +323,11 @@ class UnpatchifyMetrics:
             ] = batch['mask'][i]
 
     def compute(self):
+        # Last object
+        if self.name is not None:
+            self._calculate_metrics()
+            self._reset_current()
+
         return {
             name: metric.aggregate().item()
             for name, metric in self.metrics.items()
