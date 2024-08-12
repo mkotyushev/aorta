@@ -16,6 +16,7 @@ class AortaDataModule(LightningDataModule):
         image_size: Tuple[int, int, int] = (128, 128, 32),
         num_samples: int = None,
         val_test_cbp_margin: int = 10,
+        only_train: bool = False,
         debug: bool = False,
         batch_size: int = 4,
         num_workers: int = 0,
@@ -33,6 +34,12 @@ class AortaDataModule(LightningDataModule):
         self.train_transform = None
         self.val_transform = None
         self.test_transform = None
+
+        self.split_to_names = SPLIT_TO_NAMES
+        if only_train:
+            self.split_to_names['train'] = self.split_to_names['train'] + self.split_to_names['valid'] + self.split_to_names['test']
+            self.split_to_names['valid'] = []
+            self.split_to_names['test'] = []
 
     def build_trainsforms(self) -> None:
         self.train_transform = Compose(
@@ -59,7 +66,7 @@ class AortaDataModule(LightningDataModule):
             if stage == 'fit' and self.train_dataset is None:
                 self.train_dataset = AortaDataset(
                     data_dirpath=self.hparams.data_dirpath,
-                    names=SPLIT_TO_NAMES['train'] if not self.hparams.debug else SPLIT_TO_NAMES['train'][:5],
+                    names=self.split_to_names['train'] if not self.hparams.debug else self.split_to_names['train'][:5],
                     transform=self.train_transform,
                     pad_size=self.hparams.image_size,
                     cbp_margin=10,
@@ -67,7 +74,7 @@ class AortaDataModule(LightningDataModule):
             if stage in ['fit', 'validate'] and self.val_dataset is None:
                 self.val_dataset = AortaDataset(
                     data_dirpath=self.hparams.data_dirpath,
-                    names=SPLIT_TO_NAMES['valid'],
+                    names=self.split_to_names['valid'],
                     transform=self.val_transform,
                     patch_size=self.hparams.image_size,
                     pad_size=self.hparams.image_size,
@@ -77,7 +84,7 @@ class AortaDataModule(LightningDataModule):
             # TODO: undo cropping and padding for test dataset
             self.test_dataset = AortaDataset(
                 data_dirpath=self.hparams.data_dirpath,
-                names=SPLIT_TO_NAMES['test'],
+                names=self.split_to_names['test'],
                 transform=self.test_transform,
                 patch_size=self.hparams.image_size,
                 pad_size=self.hparams.image_size,
