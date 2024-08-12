@@ -49,7 +49,6 @@ class AortaDataModule(LightningDataModule):
                 CenteredGaussianNoise(p=0.5), 
                 GridDistortion(p=0.5), 
                 RotatePseudo2D(p=0.5), 
-                RotatePseudo2D(axes=(1, 2), limit=(-30, 30), p=0.5), 
                 NormalizeHu(sub=MIN_HU, div=MAX_HU-MIN_HU, clip=True),
             ]
         )
