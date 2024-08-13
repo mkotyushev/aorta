@@ -473,7 +473,7 @@ class AortaModule(BaseModule):
                 batch_copy[key] = value.detach().cpu()
             else:
                 batch_copy[key] = value
-        batch_copy['pred'] = preds.detach().cpu()
+        batch_copy['pred'] = torch.softmax(preds, dim=1).detach().cpu()
         return batch_copy
 
     def update_metrics(self, prefix, preds, batch):
