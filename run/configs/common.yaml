@@ -176,7 +176,7 @@ data:
     data_dirpath: /workspace/data
     image_size: [128, 128, 32]
     num_samples: 15000
-    val_test_cbp_margin: 10
+    val_test_crop_inv_share: 4
     only_train: false
     batch_size: 32
     num_workers: 10

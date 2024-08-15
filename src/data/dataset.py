@@ -146,7 +146,9 @@ class AortaDataset:
         patch_size: Tuple[int, int, int] | None = None, 
         pad_size: Tuple[int, int, int] | None = None,
         cbp_margin: int | None = None,
+        crop_inv_share: int | None = None,
     ):
+        assert cbp_margin is None or crop_inv_share is None
         if patch_size is not None:
             assert all(p % 2 == 0 for p in patch_size)
         step_size = None if patch_size is None else tuple(p // 2 for p in patch_size)
@@ -157,7 +159,25 @@ class AortaDataset:
             mask, _ = io.load(data_dirpath / 'masks' / f'subject{name:03}_label.mha')
 
             if cbp_margin is not None:
+                assert crop_inv_share is None
                 image, mask = crop_by_positive(image, mask, margin=cbp_margin, pad_size=pad_size)
+            if crop_inv_share is not None:
+                assert cbp_margin is None
+                crop_size = (
+                    image.shape[0] // crop_inv_share,
+                    image.shape[1] // crop_inv_share,
+                    image.shape[2] // crop_inv_share,  # not used
+                )
+                image = image[
+                    crop_size[0]:-crop_size[0],
+                    crop_size[1]:-crop_size[1],
+                    :
+                ]
+                mask = mask[
+                    crop_size[0]:-crop_size[0],
+                    crop_size[1]:-crop_size[1],
+                    :
+                ]
             print(f'Loaded {name}, image shape: {image.shape}, mask shape: {mask.shape}')
 
             for (

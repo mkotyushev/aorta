@@ -15,7 +15,7 @@ class AortaDataModule(LightningDataModule):
         data_dirpath: Path,
         image_size: Tuple[int, int, int] = (128, 128, 32),
         num_samples: int = None,
-        val_test_cbp_margin: int = 10,
+        val_test_crop_inv_share: int = 10,
         only_train: bool = False,
         debug: bool = False,
         batch_size: int = 4,
@@ -68,7 +68,9 @@ class AortaDataModule(LightningDataModule):
                     names=self.split_to_names['train'] if not self.hparams.debug else self.split_to_names['train'][:5],
                     transform=self.train_transform,
                     pad_size=self.hparams.image_size,
+                    # Omit background by mask
                     cbp_margin=10,
+                    crop_inv_share=None,
                 )
             if stage in ['fit', 'validate'] and self.val_dataset is None:
                 self.val_dataset = AortaDataset(
@@ -77,7 +79,9 @@ class AortaDataModule(LightningDataModule):
                     transform=self.val_transform,
                     patch_size=self.hparams.image_size,
                     pad_size=self.hparams.image_size,
-                    cbp_margin=self.hparams.val_test_cbp_margin,
+                    # Omit fixed background by share of size
+                    cbp_margin=None,
+                    crop_inv_share=self.hparams.val_test_crop_inv_share,
                 )
         elif stage == 'test' and self.test_dataset is None:
             # TODO: undo cropping and padding for test dataset
@@ -87,7 +91,9 @@ class AortaDataModule(LightningDataModule):
                 transform=self.test_transform,
                 patch_size=self.hparams.image_size,
                 pad_size=self.hparams.image_size,
-                cbp_margin=self.hparams.val_test_cbp_margin,
+                # Omit fixed background by share of size
+                cbp_margin=None,
+                crop_inv_share=self.hparams.val_test_crop_inv_share,
             )
         
     def train_dataloader(self) -> DataLoader:
