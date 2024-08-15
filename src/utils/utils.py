@@ -183,10 +183,11 @@ class UnpatchifyMetrics:
     """Unpatchify predictions to original full image assuming the dataloader is sequential
     and calculate the metrics for each full image, then aggregate them.
     """
-    def __init__(self, n_classes, metrics, save_dirpath):
+    def __init__(self, n_classes, metrics, save_dirpath, bg_multiplier=None):
         self.n_classes = n_classes
         self.metrics = metrics
         self.save_dirpath = save_dirpath
+        self.bg_multiplier = bg_multiplier
         if self.save_dirpath is not None:
             self.save_dirpath.mkdir(parents=True, exist_ok=True)
         self.name = None
@@ -234,6 +235,9 @@ class UnpatchifyMetrics:
         # Weighted average
         self.weights[self.weights == 0] = 1
         self.preds /= self.weights[None, ...]
+
+        if self.bg_multiplier is not None:
+            self.preds[0, ...] = self.preds[0, ...] * self.bg_multiplier
 
         # Argmax
         self.preds = torch.argmax(self.preds, dim=0)

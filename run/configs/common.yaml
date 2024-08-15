@@ -139,6 +139,7 @@ model:
       decoder_channels: [256, 128, 64, 32, 16]
       strides: [[2, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2], [2, 2, 2]]
     preds_save_dirpath: null
+    bg_multiplier: null
     optimizer_init:
       class_path: torch.optim.AdamW
       init_args:

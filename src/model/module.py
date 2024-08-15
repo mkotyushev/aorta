@@ -382,6 +382,7 @@ class AortaModule(BaseModule):
         seg_arch: str,
         seg_kwargs: Dict[str, Any],
         preds_save_dirpath: Path | None = None,
+        bg_multiplier: float | None = None,
         **base_kwargs,
     ):
         super().__init__(**base_kwargs)
@@ -438,6 +439,7 @@ class AortaModule(BaseModule):
                         )
                     },
                     save_dirpath=self.hparams.preds_save_dirpath,
+                    bg_multiplier=self.hparams.bg_multiplier,
                 ),
             },
             'val': {
@@ -455,6 +457,7 @@ class AortaModule(BaseModule):
                         )
                     },
                     save_dirpath=self.hparams.preds_save_dirpath,
+                    bg_multiplier=self.hparams.bg_multiplier,
                 ),
             }
         }
