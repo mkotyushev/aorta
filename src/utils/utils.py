@@ -238,6 +238,7 @@ class UnpatchifyMetrics:
 
         if self.bg_multiplier is not None:
             self.preds[0, ...] = self.preds[0, ...] * self.bg_multiplier
+            self.preds = self.preds / self.preds.sum(dim=0, keepdim=True)
 
         # Argmax
         self.preds = torch.argmax(self.preds, dim=0)
