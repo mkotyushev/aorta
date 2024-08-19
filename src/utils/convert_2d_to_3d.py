@@ -11,6 +11,9 @@ from timm.models.convnext import ConvNeXtBlock
 from timm.layers.trace_utils import _assert
 from timm.layers.norm_act import _create_act
 
+from src.utils.utils import efficientnet_init_weights_3d
+
+
 _int_tuple_3_t = Union[int, Tuple[int, int, int]]
 
 
@@ -570,6 +573,8 @@ class TimmUniversalEncoder3d(nn.Module):
         output_stride=32, 
         strides=((2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)),
     ):
+        assert not pretrained, 'Pretrained models could not be used for 3D data'
+
         super().__init__()
         kwargs = dict(
             features_only=True,
@@ -585,6 +590,9 @@ class TimmUniversalEncoder3d(nn.Module):
         self.model = timm.create_model(name, **kwargs)
         patch_first_conv(self.model, in_channels)
         convert_2d_to_3d(self.model)
+
+        if not pretrained:
+            efficientnet_init_weights_3d(self.model)
 
         self._in_channels = in_channels
         self._out_channels = [
