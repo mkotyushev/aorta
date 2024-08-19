@@ -133,6 +133,7 @@ model:
     seg_arch: smp.Unet
     seg_kwargs:
       encoder_name: tu-tf_efficientnetv2_m.in21k_ft_in1k
+      encoder_weights: null
       in_channels: 1
       classes: 24
       encoder_depth: 5
