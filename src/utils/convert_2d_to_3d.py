@@ -1,19 +1,23 @@
+import logging
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import types
 import timm
-from typing import Tuple, Union, List, Optional
+from typing import Tuple, Union, List, Optional, Callable
 from enum import Enum
-from timm.layers import LayerNorm2d, SelectAdaptivePool2d, BatchNormAct2d, Conv2dSame, fast_layer_norm, is_fast_norm, get_same_padding
+from timm.layers import LayerNorm2d, SelectAdaptivePool2d, BatchNormAct2d, Conv2dSame, PatchEmbed, fast_layer_norm, is_fast_norm, get_same_padding, to_3tuple, Format as Format2d, apply_keep_indices_nlc, trunc_normal_
 from timm.layers.grn import GlobalResponseNorm
 from timm.models.convnext import ConvNeXtBlock
+from timm.models.eva import feature_take_indices, Eva
 from timm.layers.trace_utils import _assert
 from timm.layers.norm_act import _create_act
 
 from src.utils.utils import efficientnet_init_weights_3d
 
 
+_logger = logging.getLogger(__name__)
 _int_tuple_3_t = Union[int, Tuple[int, int, int]]
 
 
@@ -481,34 +485,40 @@ def repeat_last_size(size, ndim):
     return (*size, *(size[-1] for _ in range(ndim - len(size))))
 
 
+def conv_2d_to_3d(child_layer):
+    assert child_layer.weight.shape[-1] == child_layer.weight.shape[-2]
+    new_dim = child_layer.weight.shape[-1]
+    new_conv_class = Conv3dSame if isinstance(child_layer, Conv2dSame) else nn.Conv3d
+
+    new_child_layer = new_conv_class(
+        in_channels=child_layer.in_channels, 
+        out_channels=child_layer.out_channels, 
+        kernel_size=repeat_last_size(child_layer.kernel_size, ndim=3), 
+        stride=repeat_last_size(child_layer.stride, ndim=3), 
+        padding=repeat_last_size(child_layer.padding, ndim=3), 
+        dilation=repeat_last_size(child_layer.dilation, ndim=3), 
+        groups=child_layer.groups, 
+        bias=child_layer.bias is not None,
+    )
+    new_child_layer.weight = nn.Parameter(
+        (
+            (child_layer.weight[..., None, :, :] / new_dim) + 
+            (child_layer.weight[..., :, None, :] / new_dim) + 
+            (child_layer.weight[..., :, :, None] / new_dim)
+        ) / 3,
+        requires_grad=child_layer.weight.requires_grad
+    )
+    if child_layer.bias is not None:
+        new_child_layer.bias = child_layer.bias
+
+    return new_child_layer
+
+
 def convert_2d_to_3d(layer):
     for child_layer_name, child_layer in layer.named_children():
         new_child_layer = None
         if isinstance(child_layer, (nn.Conv2d, Conv2dSame)):
-            assert child_layer.weight.shape[-1] == child_layer.weight.shape[-2]
-            new_dim = child_layer.weight.shape[-1]
-            new_conv_class = Conv3dSame if isinstance(child_layer, Conv2dSame) else nn.Conv3d
-
-            new_child_layer = new_conv_class(
-                in_channels=child_layer.in_channels, 
-                out_channels=child_layer.out_channels, 
-                kernel_size=repeat_last_size(child_layer.kernel_size, ndim=3), 
-                stride=repeat_last_size(child_layer.stride, ndim=3), 
-                padding=repeat_last_size(child_layer.padding, ndim=3), 
-                dilation=repeat_last_size(child_layer.dilation, ndim=3), 
-                groups=child_layer.groups, 
-                bias=child_layer.bias is not None,
-            )
-            new_child_layer.weight = nn.Parameter(
-                (
-                    (child_layer.weight[..., None, :, :] / new_dim) + 
-                    (child_layer.weight[..., :, None, :] / new_dim) + 
-                    (child_layer.weight[..., :, :, None] / new_dim)
-                ) / 3,
-                requires_grad=child_layer.weight.requires_grad
-            )
-            if child_layer.bias is not None:
-                new_child_layer.bias = child_layer.bias
+            new_child_layer = conv_2d_to_3d(child_layer)
         elif isinstance(child_layer, LayerNorm2d):
             new_child_layer = LayerNorm3d(
                 num_channels=child_layer.normalized_shape, 
@@ -553,10 +563,40 @@ def convert_2d_to_3d(layer):
                 flatten=isinstance(child_layer.pool, nn.Flatten),
                 input_fmt=input_fmt,
             )
+        elif isinstance(child_layer, PatchEmbed):
+            assert child_layer.output_fmt is None or child_layer.output_fmt == Format2d.NCHW, \
+                f'PatchEmbed.output_fmt other than NCHW(D) is not supported for 3D data, got {child_layer.output_fmt}'
+            assert child_layer.proj.weight.shape[-1] == child_layer.proj.weight.shape[-2]
+            new_child_layer = PatchEmbed3d(
+                img_size=repeat_last_size(child_layer.img_size, ndim=3),
+                patch_size=repeat_last_size(child_layer.patch_size, ndim=3),
+                in_chans=child_layer.proj.in_channels,
+                embed_dim=child_layer.proj.out_channels,
+                norm_layer=not isinstance(child_layer.norm, nn.Identity),
+                flatten=child_layer.flatten,
+                output_fmt=None,
+                bias=child_layer.proj.bias is not None,
+                strict_img_size=child_layer.strict_img_size,
+                dynamic_img_pad=child_layer.dynamic_img_pad,
+            )
+
+            # Replace conv & norm weights
+            new_child_layer.proj = conv_2d_to_3d(child_layer.proj)
+            if not isinstance(child_layer.norm, nn.Identity):
+                new_child_layer.norm.weight = child_layer.norm.weight
+                new_child_layer.norm.bias = child_layer.norm.bias
+
+            # Replace pos_embed
+            layer.pos_embed = nn.Parameter(
+                torch.zeros(1, new_child_layer.num_patches + layer.num_prefix_tokens, layer.embed_dim)) if layer.pos_embed is not None else None
         else:
             # TODO: move to context manager
             if isinstance(child_layer, ConvNeXtBlock):
                 setattr(child_layer, 'forward', types.MethodType(ConvNeXtBlock_forward_3d, child_layer))
+            elif isinstance(child_layer, Eva):
+                setattr(child_layer, 'forward_intermediates', types.MethodType(Eva_forward_intermediates_3d, child_layer))
+                setattr(child_layer, '_pos_embed', types.MethodType(Eva__pos_embed_3d, child_layer))
+                setattr(child_layer, 'init_weights', types.MethodType(Eva_init_weights_3d, child_layer))
             convert_2d_to_3d(child_layer)
 
         if new_child_layer is not None:
@@ -581,6 +621,7 @@ class TimmUniversalEncoder3d(nn.Module):
             output_stride=output_stride,
             pretrained=pretrained,
             out_indices=tuple(range(depth)),
+            img_size=128,
         )
 
         # not all models support output stride argument, drop it by default
@@ -592,7 +633,12 @@ class TimmUniversalEncoder3d(nn.Module):
         convert_2d_to_3d(self.model)
 
         if not pretrained:
-            efficientnet_init_weights_3d(self.model)
+            if isinstance(self.model, timm.models.efficientnet.EfficientNet):
+                efficientnet_init_weights_3d(self.model)
+            elif isinstance(self.model, timm.models._features.FeatureGetterNet):
+                self.model.model.init_weights()
+            else:
+                raise NotImplementedError(f'Initialization for {name} is not implemented, got class {self.model}')
 
         self._in_channels = in_channels
         self._out_channels = [
@@ -617,3 +663,358 @@ class TimmUniversalEncoder3d(nn.Module):
     @property
     def output_stride(self):
         return min(self._output_stride, 2**self._depth)
+
+
+def nchwd_to(x, fmt: FormatT):
+    raise NotImplementedError()
+
+
+class PatchEmbed3d(nn.Module):
+    """ 3D Image to Patch Embedding
+    """
+    output_fmt: Format
+    dynamic_img_pad: torch.jit.Final[bool]
+
+    def __init__(
+            self,
+            img_size: Optional[int] = 224,
+            patch_size: int = 16,
+            in_chans: int = 3,
+            embed_dim: int = 768,
+            norm_layer: Optional[Callable] = None,
+            flatten: bool = True,
+            output_fmt: Optional[str] = None,
+            bias: bool = True,
+            strict_img_size: bool = True,
+            dynamic_img_pad: bool = False,
+    ):
+        super().__init__()
+        self.patch_size = to_3tuple(patch_size)
+        self.img_size, self.grid_size, self.num_patches = self._init_img_size(img_size)
+
+        if output_fmt is not None:
+            self.flatten = False
+            self.output_fmt = Format(output_fmt)
+        else:
+            # flatten spatial dim and transpose to channels last, kept for bwd compat
+            self.flatten = flatten
+            self.output_fmt = Format.NCHWD
+        self.strict_img_size = strict_img_size
+        self.dynamic_img_pad = dynamic_img_pad
+
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size, bias=bias)
+        self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
+
+    def _init_img_size(self, img_size: Union[int, Tuple[int, int, int]]):
+        assert self.patch_size
+        if img_size is None:
+            return None, None, None
+        img_size = to_3tuple(img_size)
+        grid_size = tuple([s // p for s, p in zip(img_size, self.patch_size)])
+        num_patches = grid_size[0] * grid_size[1] * grid_size[2]
+        return img_size, grid_size, num_patches
+
+    def set_input_size(
+            self,
+            img_size: Optional[Union[int, Tuple[int, int, int]]] = None,
+            patch_size: Optional[Union[int, Tuple[int, int, int]]] = None,
+    ):
+        new_patch_size = None
+        if patch_size is not None:
+            new_patch_size = to_3tuple(patch_size)
+        if new_patch_size is not None and new_patch_size != self.patch_size:
+            with torch.no_grad():
+                new_proj = nn.Conv3d(
+                    self.proj.in_channels,
+                    self.proj.out_channels,
+                    kernel_size=new_patch_size,
+                    stride=new_patch_size,
+                    bias=self.proj.bias is not None,
+                )
+                new_proj.weight.copy_(resample_patch_embed_3d(self.proj.weight, new_patch_size, verbose=True))
+                if self.proj.bias is not None:
+                    new_proj.bias.copy_(self.proj.bias)
+                self.proj = new_proj
+            self.patch_size = new_patch_size
+        img_size = img_size or self.img_size
+        if img_size != self.img_size or new_patch_size is not None:
+            self.img_size, self.grid_size, self.num_patches = self._init_img_size(img_size)
+
+    def feat_ratio(self, as_scalar=True) -> Union[Tuple[int, int, int], int]:
+        if as_scalar:
+            return max(self.patch_size)
+        else:
+            return self.patch_size
+
+    def dynamic_feat_size(self, img_size: Tuple[int, int, int]) -> Tuple[int, int, int]:
+        """ Get grid (feature) size for given image size taking account of dynamic padding.
+        NOTE: must be torchscript compatible so using fixed tuple indexing
+        """
+        if self.dynamic_img_pad:
+            return math.ceil(img_size[0] / self.patch_size[0]), math.ceil(img_size[1] / self.patch_size[1]), math.ceil(img_size[2] / self.patch_size[2])
+        else:
+            return img_size[0] // self.patch_size[0], img_size[1] // self.patch_size[1], img_size[2] // self.patch_size[2]
+
+    def forward(self, x):
+        B, C, H, W, D = x.shape
+        if self.img_size is not None:
+            if self.strict_img_size:
+                _assert(H == self.img_size[0], f"Input height ({H}) doesn't match model ({self.img_size[0]}).")
+                _assert(W == self.img_size[1], f"Input width ({W}) doesn't match model ({self.img_size[1]}).")
+                _assert(D == self.img_size[2], f"Input depth ({D}) doesn't match model ({self.img_size[2]}).")
+            elif not self.dynamic_img_pad:
+                _assert(
+                    H % self.patch_size[0] == 0,
+                    f"Input height ({H}) should be divisible by patch size ({self.patch_size[0]})."
+                )
+                _assert(
+                    W % self.patch_size[1] == 0,
+                    f"Input width ({W}) should be divisible by patch size ({self.patch_size[1]})."
+                )
+                _assert(
+                    D % self.patch_size[2] == 0,
+                    f"Input depth ({D}) should be divisible by patch size ({self.patch_size[2]})."
+                )
+        if self.dynamic_img_pad:
+            pad_h = (self.patch_size[0] - H % self.patch_size[0]) % self.patch_size[0]
+            pad_w = (self.patch_size[1] - W % self.patch_size[1]) % self.patch_size[1]
+            pad_d = (self.patch_size[2] - D % self.patch_size[2]) % self.patch_size[2]
+            x = F.pad(x, (0, pad_w, 0, pad_h, 0, pad_d))
+        x = self.proj(x)
+        if self.flatten:
+            x = x.flatten(2).transpose(1, 2)  # NCHWD -> NLC
+        elif self.output_fmt != Format.NCHWD:
+            x = nchwd_to(x, self.output_fmt)
+        x = self.norm(x)
+        return x
+
+
+
+def resample_patch_embed_3d(
+        patch_embed,
+        new_size: List[int],
+        interpolation: str = 'bicubic',
+        antialias: bool = True,
+        verbose: bool = False,
+):
+    """Resample the weights of the patch embedding kernel to target resolution.
+    We resample the patch embedding kernel by approximately inverting the effect
+    of patch resizing.
+
+    Code based on:
+      https://github.com/google-research/big_vision/blob/b00544b81f8694488d5f36295aeb7972f3755ffe/big_vision/models/proj/flexi/vit.py
+
+    With this resizing, we can for example load a B/8 filter into a B/16 model
+    and, on 2x larger input image, the result will match.
+
+    Args:
+        patch_embed: original parameter to be resized.
+        new_size (tuple(int, int, int): target shape (height, width, depth)-only.
+        interpolation (str): interpolation for resize
+        antialias (bool): use anti-aliasing filter in resize
+        verbose (bool): log operation
+    Returns:
+        Resized patch embedding kernel.
+    """
+    import numpy as np
+    try:
+        from torch import vmap
+    except ImportError:
+        from functorch import vmap
+
+    assert len(patch_embed.shape) == 5, "Five dimensions expected"
+    assert len(new_size) == 3, "New shape should only be hw"
+    old_size = patch_embed.shape[-3:]
+    if tuple(old_size) == tuple(new_size):
+        return patch_embed
+
+    if verbose:
+        _logger.info(f"Resize patch embedding {patch_embed.shape} to {new_size}, w/ {interpolation} interpolation.")
+
+    def resize(x_np, _new_size):
+        x_tf = torch.Tensor(x_np)[None, None, ...]
+        x_upsampled = F.interpolate(
+            x_tf, size=_new_size, mode=interpolation, antialias=antialias)[0, 0, ...].numpy()
+        return x_upsampled
+
+    def get_resize_mat(_old_size, _new_size):
+        mat = []
+        for i in range(np.prod(_old_size)):
+            basis_vec = np.zeros(_old_size)
+            basis_vec[np.unravel_index(i, _old_size)] = 1.
+            mat.append(resize(basis_vec, _new_size).reshape(-1))
+        return np.stack(mat).T
+
+    resize_mat = get_resize_mat(old_size, new_size)
+    resize_mat_pinv = torch.tensor(np.linalg.pinv(resize_mat.T), device=patch_embed.device)
+
+    def resample_kernel(kernel):
+        resampled_kernel = resize_mat_pinv @ kernel.reshape(-1)
+        return resampled_kernel.reshape(new_size)
+
+    v_resample_kernel = vmap(vmap(resample_kernel, 0, 0), 1, 1)
+    orig_dtype = patch_embed.dtype
+    patch_embed = patch_embed.float()
+    patch_embed = v_resample_kernel(patch_embed)
+    patch_embed = patch_embed.to(orig_dtype)
+    return patch_embed
+
+
+def resample_abs_pos_embed_3d(
+        posemb: torch.Tensor,
+        new_size: List[int],
+        old_size: Optional[List[int]] = None,
+        num_prefix_tokens: int = 1,
+        interpolation: str = 'bicubic',
+        antialias: bool = True,
+        verbose: bool = False,
+):
+    # sort out sizes, assume square if old size not provided
+    num_pos_tokens = posemb.shape[1]
+    num_new_tokens = new_size[0] * new_size[1] * new_size[2] + num_prefix_tokens
+    if num_new_tokens == num_pos_tokens and new_size[0] == new_size[1] == new_size[2]:
+        return posemb
+
+    if old_size is None:
+        hwd = int((num_pos_tokens - num_prefix_tokens) ** (1. / 3))
+        old_size = hwd, hwd, hwd
+
+    if num_prefix_tokens:
+        posemb_prefix, posemb = posemb[:, :num_prefix_tokens], posemb[:, num_prefix_tokens:]
+    else:
+        posemb_prefix, posemb = None, posemb
+
+    # do the interpolation
+    embed_dim = posemb.shape[-1]
+    orig_dtype = posemb.dtype
+    posemb = posemb.float()  # interpolate needs float32
+    posemb = posemb.reshape(1, old_size[0], old_size[1], old_size[2], -1).permute(0, 4, 1, 2, 3)
+    posemb = F.interpolate(posemb, size=new_size, mode=interpolation, antialias=antialias)
+    posemb = posemb.permute(0, 2, 3, 4, 1).reshape(1, -1, embed_dim)
+    posemb = posemb.to(orig_dtype)
+
+    # add back extra (class, etc) prefix tokens
+    if posemb_prefix is not None:
+        posemb = torch.cat([posemb_prefix, posemb], dim=1)
+
+    if not torch.jit.is_scripting() and verbose:
+        _logger.info(f'Resized position embedding: {old_size} to {new_size}.')
+
+    return posemb
+
+
+def Eva_forward_intermediates_3d(
+        self,
+        x: torch.Tensor,
+        indices: Optional[Union[int, List[int]]] = None,
+        return_prefix_tokens: bool = False,
+        norm: bool = False,
+        stop_early: bool = False,
+        output_fmt: str = 'NCHWD',
+        intermediates_only: bool = False,
+) -> Union[List[torch.Tensor], Tuple[torch.Tensor, List[torch.Tensor]]]:
+    """ Forward features that returns intermediates.
+    Args:
+        x: Input image tensor
+        indices: Take last n blocks if an int, if is a sequence, select by matching indices
+        return_prefix_tokens: Return both prefix and spatial intermediate tokens
+        norm: Apply norm layer to all intermediates
+        stop_early: Stop iterating over blocks when last desired intermediate hit
+        output_fmt: Shape of intermediate feature outputs
+        intermediates_only: Only return intermediate features
+    """
+    # NOTE: here we expect NCHWD format, but NCHW is ok because the method called from 2D model
+    assert output_fmt in ('NCHW', 'NLC'), 'Output format for EVA-ViT features must be one of NCHW or NLC.'
+    reshape = output_fmt == 'NCHWD'
+    intermediates = []
+    take_indices, max_index = feature_take_indices(len(self.blocks), indices)
+
+    # forward pass
+    B, _, height, width, depth = x.shape
+    x = self.patch_embed(x)
+    x, rot_pos_embed = self._pos_embed(x)
+    if torch.jit.is_scripting() or not stop_early:  # can't slice blocks in torchscript
+        blocks = self.blocks
+    else:
+        blocks = self.blocks[:max_index + 1]
+    for i, blk in enumerate(blocks):
+        x = blk(x, rope=rot_pos_embed)
+        if i in take_indices:
+            intermediates.append(self.norm(x) if norm else x)
+
+    # process intermediates
+    if self.num_prefix_tokens:
+        # split prefix (e.g. class, distill) and spatial feature tokens
+        prefix_tokens = [y[:, 0:self.num_prefix_tokens] for y in intermediates]
+        intermediates = [y[:, self.num_prefix_tokens:] for y in intermediates]
+    if reshape:
+        # reshape to BCHW output format
+        H, W, D = self.patch_embed.dynamic_feat_size((height, width, depth))
+        intermediates = [y.reshape(B, H, W, D, -1).permute(0, 4, 1, 2, 3).contiguous() for y in intermediates]
+    if not torch.jit.is_scripting() and return_prefix_tokens:
+        # return_prefix not support in torchscript due to poor type handling
+        intermediates = list(zip(intermediates, prefix_tokens))
+
+    if intermediates_only:
+        return intermediates
+
+    x = self.norm(x)
+
+    return x, intermediates
+
+
+def Eva__pos_embed_3d(self, x) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    if self.dynamic_img_size:
+        B, H, W, D, C = x.shape
+        if self.pos_embed is not None:
+            pos_embed = resample_abs_pos_embed_3d(
+                self.pos_embed,
+                (H, W, D),
+                num_prefix_tokens=self.num_prefix_tokens,
+            )
+        else:
+            pos_embed = None
+        x = x.view(B, -1, C)
+        rot_pos_embed = self.rope.get_embed(shape=(H, W, D)) if self.rope is not None else None
+    else:
+        pos_embed = self.pos_embed
+        rot_pos_embed = self.rope.get_embed() if self.rope is not None else None
+
+    if self.cls_token is not None:
+        x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
+
+    if pos_embed is not None:
+        x = x + pos_embed
+
+    if self.reg_token is not None:
+        to_cat = []
+        if self.cls_token is not None:
+            to_cat.append(self.cls_token.expand(x.shape[0], -1, -1))
+        to_cat.append(self.reg_token.expand(x.shape[0], -1, -1))
+        x = torch.cat(to_cat + [x], dim=1)
+
+    x = self.pos_drop(x)
+
+    # obtain shared rotary position embedding and apply patch dropout
+    if self.patch_drop is not None:
+        x, keep_indices = self.patch_drop(x)
+        if rot_pos_embed is not None and keep_indices is not None:
+            rot_pos_embed = apply_keep_indices_nlc(x, rot_pos_embed, keep_indices)
+    return x, rot_pos_embed
+
+
+def Eva_init_weights_3d(self):
+    self.apply(self._init_weights)
+    if self.pos_embed is not None:
+        trunc_normal_(self.pos_embed, std=.02)
+    if self.cls_token is not None:
+        trunc_normal_(self.cls_token, std=.02)
+    if self.reg_token is not None:
+        trunc_normal_(self.reg_token, std=.02)
+
+    head_init_scale = 0.001
+    self.fix_init_weight()
+    if isinstance(self.head, nn.Linear):
+        trunc_normal_(self.head.weight, std=.02)
+        self.head.weight.data.mul_(head_init_scale)
+        self.head.bias.data.mul_(head_init_scale)

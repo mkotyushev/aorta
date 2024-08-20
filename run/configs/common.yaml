@@ -132,7 +132,7 @@ model:
   init_args:
     seg_arch: smp.Unet
     seg_kwargs:
-      encoder_name: tu-tf_efficientnetv2_m.in21k_ft_in1k
+      encoder_name: tu-eva02_base_patch14_448.mim_in22k_ft_in22k_in1k
       encoder_weights: null
       in_channels: 1
       classes: 24

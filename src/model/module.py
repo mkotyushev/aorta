@@ -12,7 +12,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from src.utils.utils import state_norm, UnpatchifyMetrics
-from src.utils.convert_2d_to_3d import TimmUniversalEncoder3d
+from src.utils.convert_2d_to_3d import TimmUniversalEncoder3d, resample_abs_pos_embed_3d
 from src.model.my_smp.deeplabv3_model import DeepLabV3Plus
 
 
@@ -367,13 +367,15 @@ def encoder_name_to_patch_context_args(encoder_name):
         return []
 
     # Custom 3D encoders
-    if 'convnext' in encoder_name or 'efficientnet' in encoder_name:
-        return [
-            ('segmentation_models_pytorch_3d.encoders.TimmUniversalEncoder', TimmUniversalEncoder3d),
-            # ('timm.models.convnext.ConvNeXtBlock.forward', ConvNeXtBlock_forward_3d),
+    context_args = [
+        ('segmentation_models_pytorch_3d.encoders.TimmUniversalEncoder', TimmUniversalEncoder3d),
+    ]
+    if 'eva' in encoder_name:
+        context_args += [
+            ('timm.models.eva.resample_abs_pos_embed', resample_abs_pos_embed_3d),
         ]
-    else:
-        raise ValueError(f'Unknown encoder_name {encoder_name}.')
+    
+    return context_args
 
 
 class AortaModule(BaseModule):
