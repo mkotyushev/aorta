@@ -1,4 +1,4 @@
-ARG CUDA_VERSION=12.1.0
+ARG CUDA_VERSION=11.8.0
 
 # Base CUDA devel image
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
