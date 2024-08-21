@@ -21,6 +21,7 @@ from timm.layers import (
     Format as Format2d, 
     apply_keep_indices_nlc, 
     trunc_normal_,
+    build_fourier_pos_embed,
 )
 from timm.layers.grn import GlobalResponseNorm
 from timm.models.convnext import ConvNeXtBlock
@@ -607,7 +608,6 @@ def convert_2d_to_3d(layer):
             # Replace rotary embed
             if layer.rope is not None:
                 num_heads = layer.blocks[0].attn.num_heads
-                print(new_child_layer.grid_size)
                 layer.rope = RotaryEmbeddingCat(
                     layer.embed_dim // num_heads,
                     in_pixels=False,
@@ -637,6 +637,7 @@ class TimmUniversalEncoder3d(nn.Module):
         depth=5, 
         output_stride=32, 
         strides=((2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2), (2, 2, 2)),
+        create_model_kwargs=None,
     ):
         assert not pretrained, 'Pretrained models could not be used for 3D data'
 
@@ -646,9 +647,8 @@ class TimmUniversalEncoder3d(nn.Module):
             output_stride=output_stride,
             pretrained=pretrained,
             out_indices=tuple(range(depth)),
-            img_size=128,
             ref_feat_shape=None,
-        )
+        ) | (create_model_kwargs if create_model_kwargs is not None else {})
 
         # not all models support output stride argument, drop it by default
         if output_stride == 32:
@@ -689,6 +689,34 @@ class TimmUniversalEncoder3d(nn.Module):
     @property
     def output_stride(self):
         return min(self._output_stride, 2**self._depth)
+
+
+
+class TimmUniversalEncoderEva3d(TimmUniversalEncoder3d):
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+    ):
+        aux_create_model_kwargs = dict(
+            img_size=112,
+            embed_dim=792,
+        )
+        super().__init__(
+            *args,
+            **kwargs,
+            create_model_kwargs=aux_create_model_kwargs,
+        )
+
+    def forward(self, x):
+        features = self.model(x)
+        # Eva's features are of same spatial size (// 4 w. r. t. input)
+        # so we need to upsample last feature manually
+        features[0] = F.interpolate(features[0], scale_factor=2, mode='nearest')
+        features = [
+            x,
+        ] + features
+        return features
 
 
 def nchwd_to(x, fmt: FormatT):
@@ -886,7 +914,7 @@ def resample_patch_embed_3d(
     return patch_embed
 
 
-def resample_abs_pos_embed_3d(
+def Eva_resample_abs_pos_embed_3d(
         posemb: torch.Tensor,
         new_size: List[int],
         old_size: Optional[List[int]] = None,
@@ -951,7 +979,7 @@ def Eva_forward_intermediates_3d(
     """
     # NOTE: here we expect NCHWD format, but NCHW is ok because the method called from 2D model
     assert output_fmt in ('NCHW', 'NLC'), 'Output format for EVA-ViT features must be one of NCHW or NLC.'
-    reshape = output_fmt == 'NCHWD'
+    reshape = output_fmt == 'NCHW'
     intermediates = []
     take_indices, max_index = feature_take_indices(len(self.blocks), indices)
 
@@ -993,7 +1021,7 @@ def Eva__pos_embed_3d(self, x) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
     if self.dynamic_img_size:
         B, H, W, D, C = x.shape
         if self.pos_embed is not None:
-            pos_embed = resample_abs_pos_embed_3d(
+            pos_embed = Eva_resample_abs_pos_embed_3d(
                 self.pos_embed,
                 (H, W, D),
                 num_prefix_tokens=self.num_prefix_tokens,
@@ -1044,3 +1072,52 @@ def Eva_init_weights_3d(self):
         trunc_normal_(self.head.weight, std=.02)
         self.head.weight.data.mul_(head_init_scale)
         self.head.bias.data.mul_(head_init_scale)
+
+
+def Eva_build_rotary_pos_embed_3d(
+        feat_shape: List[int],
+        bands: Optional[torch.Tensor] = None,
+        dim: int = 64,
+        max_res: int = 224,
+        temperature: float = 10000.,
+        linear_bands: bool = False,
+        in_pixels: bool = True,
+        ref_feat_shape: Optional[List[int]] = None,
+        dtype: torch.dtype = torch.float32,
+        device: Optional[torch.device] = None,
+):
+    """
+
+    Args:
+        feat_shape: Spatial shape of the target tensor for embedding.
+        bands: Optional pre-generated frequency bands
+        dim: Output dimension of embedding tensor.
+        max_res: Maximum resolution for pixel mode.
+        temperature: Temperature (inv freq) for non-pixel mode
+        linear_bands: Linearly (instead of log) spaced bands for pixel mode
+        in_pixels: Pixel vs language (inv freq) mode.
+        dtype: Output dtype.
+        device: Output device.
+
+    Returns:
+
+    """
+    sin_emb, cos_emb = build_fourier_pos_embed(
+        feat_shape,
+        bands=bands,
+        num_bands=dim // 6,
+        max_res=max_res,
+        temperature=temperature,
+        linear_bands=linear_bands,
+        in_pixels=in_pixels,
+        ref_feat_shape=ref_feat_shape,
+        device=device,
+        dtype=dtype,
+    )
+    num_spatial_dim = 1
+    # this would be much nicer as a .numel() call to torch.Size(), but torchscript sucks
+    for x in feat_shape:
+        num_spatial_dim *= x
+    sin_emb = sin_emb.reshape(num_spatial_dim, -1).repeat_interleave(2, -1)
+    cos_emb = cos_emb.reshape(num_spatial_dim, -1).repeat_interleave(2, -1)
+    return sin_emb, cos_emb

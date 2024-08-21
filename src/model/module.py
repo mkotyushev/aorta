@@ -11,8 +11,13 @@ from lightning.pytorch.utilities import grad_norm
 from unittest.mock import patch
 from pathlib import Path
 
-from src.utils.utils import state_norm, UnpatchifyMetrics
-from src.utils.convert_2d_to_3d import TimmUniversalEncoder3d, resample_abs_pos_embed_3d
+from src.utils.utils import state_norm, patch_any_size_unet, UnpatchifyMetrics
+from src.utils.convert_2d_to_3d import (
+    TimmUniversalEncoder3d, 
+    TimmUniversalEncoderEva3d, 
+    Eva_resample_abs_pos_embed_3d, 
+    Eva_build_rotary_pos_embed_3d,
+)
 from src.model.my_smp.deeplabv3_model import DeepLabV3Plus
 
 
@@ -371,8 +376,10 @@ def encoder_name_to_patch_context_args(encoder_name):
         ('segmentation_models_pytorch_3d.encoders.TimmUniversalEncoder', TimmUniversalEncoder3d),
     ]
     if 'eva' in encoder_name:
-        context_args += [
-            ('timm.models.eva.resample_abs_pos_embed', resample_abs_pos_embed_3d),
+        context_args = [
+            ('segmentation_models_pytorch_3d.encoders.TimmUniversalEncoder', TimmUniversalEncoderEva3d),
+            ('timm.models.eva.resample_abs_pos_embed', Eva_resample_abs_pos_embed_3d),
+            ('timm.layers.pos_embed_sincos.build_rotary_pos_embed', Eva_build_rotary_pos_embed_3d),
         ]
     
     return context_args
@@ -404,6 +411,8 @@ class AortaModule(BaseModule):
         with ExitStack() as stack:
             _ = [stack.enter_context(patch(*args)) for args in context_args]
             self.model = seg_class(**seg_kwargs)
+
+        self.model = patch_any_size_unet(self.model)
 
     def compute_loss_preds(self, batch, *args, **kwargs):
         """Compute losses and predictions."""
