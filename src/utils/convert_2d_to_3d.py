@@ -701,6 +701,7 @@ class TimmUniversalEncoderEva3d(TimmUniversalEncoder3d):
         aux_create_model_kwargs = dict(
             img_size=112,
             embed_dim=792,
+            out_indices=[3, 5, 7, 9, 11],
         )
         super().__init__(
             *args,
