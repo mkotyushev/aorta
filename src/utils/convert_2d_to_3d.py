@@ -7,7 +7,21 @@ import types
 import timm
 from typing import Tuple, Union, List, Optional, Callable
 from enum import Enum
-from timm.layers import LayerNorm2d, SelectAdaptivePool2d, BatchNormAct2d, Conv2dSame, PatchEmbed, fast_layer_norm, is_fast_norm, get_same_padding, to_3tuple, Format as Format2d, apply_keep_indices_nlc, trunc_normal_
+from timm.layers import (
+    LayerNorm2d, 
+    SelectAdaptivePool2d, 
+    BatchNormAct2d, 
+    Conv2dSame, 
+    PatchEmbed, 
+    RotaryEmbeddingCat,
+    fast_layer_norm, 
+    is_fast_norm, 
+    get_same_padding, 
+    to_3tuple, 
+    Format as Format2d, 
+    apply_keep_indices_nlc, 
+    trunc_normal_,
+)
 from timm.layers.grn import GlobalResponseNorm
 from timm.models.convnext import ConvNeXtBlock
 from timm.models.eva import feature_take_indices, Eva
@@ -589,6 +603,17 @@ def convert_2d_to_3d(layer):
             # Replace pos_embed
             layer.pos_embed = nn.Parameter(
                 torch.zeros(1, new_child_layer.num_patches + layer.num_prefix_tokens, layer.embed_dim)) if layer.pos_embed is not None else None
+            
+            # Replace rotary embed
+            if layer.rope is not None:
+                num_heads = layer.blocks[0].attn.num_heads
+                print(new_child_layer.grid_size)
+                layer.rope = RotaryEmbeddingCat(
+                    layer.embed_dim // num_heads,
+                    in_pixels=False,
+                    feat_shape=new_child_layer.grid_size,
+                    ref_feat_shape=None,
+                )
         else:
             # TODO: move to context manager
             if isinstance(child_layer, ConvNeXtBlock):
@@ -622,6 +647,7 @@ class TimmUniversalEncoder3d(nn.Module):
             pretrained=pretrained,
             out_indices=tuple(range(depth)),
             img_size=128,
+            ref_feat_shape=None,
         )
 
         # not all models support output stride argument, drop it by default
