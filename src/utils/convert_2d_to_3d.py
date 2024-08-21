@@ -655,7 +655,7 @@ class TimmUniversalEncoder3d(nn.Module):
             kwargs.pop("output_stride")
 
         self.model = timm.create_model(name, **kwargs)
-        patch_first_conv(self.model, in_channels)
+        patch_first_conv(self.model, in_channels, pretrained=pretrained)
         convert_2d_to_3d(self.model)
 
         if not pretrained:
