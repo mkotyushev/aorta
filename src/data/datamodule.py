@@ -46,8 +46,6 @@ class AortaDataModule(LightningDataModule):
         self.train_transform = Compose(
             [
                 RandomCropPad(self.hparams.image_size),
-                ConvertTypes(),
-                CenteredGaussianNoise(p=0.5), 
                 ImageToVoxel(),
                 V.Contrast(
                     contrast_limit=0.01,
@@ -69,8 +67,6 @@ class AortaDataModule(LightningDataModule):
                 ),
                 VoxelsToImage(),
                 ConvertTypes(),
-                GridDistortion(p=0.5), 
-                RotatePseudo2D(p=0.5), 
                 NormalizeHu(sub=MIN_HU, div=MAX_HU-MIN_HU, clip=True),
             ]
         )
