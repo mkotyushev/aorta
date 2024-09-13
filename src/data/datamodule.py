@@ -1,3 +1,4 @@
+import voxelmentations as V
 from lightning.pytorch import LightningDataModule
 from pathlib import Path
 from torch.utils.data import DataLoader, RandomSampler
@@ -5,7 +6,7 @@ from typing import Tuple
 from volumentations import RotatePseudo2D, GridDistortion
 
 from src.data.dataset import AortaDataset
-from src.data.transforms import Compose, NormalizeHu, ConvertTypes, RandomCropPad, CenteredGaussianNoise
+from src.data.transforms import Compose, NormalizeHu, ConvertTypes, RandomCropPad, CenteredGaussianNoise, ImageToVoxel, VoxelsToImage
 from src.data.constants import SPLIT_TO_NAMES, MIN_HU, MAX_HU
 
 
@@ -47,6 +48,27 @@ class AortaDataModule(LightningDataModule):
                 RandomCropPad(self.hparams.image_size),
                 ConvertTypes(),
                 CenteredGaussianNoise(p=0.5), 
+                ImageToVoxel(),
+                V.Contrast(
+                    contrast_limit=0.01,
+                    p=1.,
+                ),
+                V.IntensityShift(
+                    shift_limit=0.1,
+                    p=1.,
+                ),
+                V.GaussNoise(
+                    variance=5.224080277244031,
+                    p=1.,
+                ),
+                V.AxialPlaneAffine(
+                    angle_limit=14.666456843479184,
+                    shift_limit=0.011608995052867388,
+                    scale_limit=0.13132223704390011,
+                    fill_value=-1000,
+                ),
+                VoxelsToImage(),
+                ConvertTypes(),
                 GridDistortion(p=0.5), 
                 RotatePseudo2D(p=0.5), 
                 NormalizeHu(sub=MIN_HU, div=MAX_HU-MIN_HU, clip=True),

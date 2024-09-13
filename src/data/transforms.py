@@ -120,3 +120,15 @@ class CenteredGaussianNoise:
             noise = np.random.normal(0, std, data['image'].shape)
             data['image'] += noise
         return data
+
+
+class ImageToVoxel:
+    def __call__(self, **data):
+        data['voxel'] = data['image']
+        return data
+
+
+class VoxelsToImage:
+    def __call__(self, **data):
+        data['image'] = data['voxel']
+        return data
