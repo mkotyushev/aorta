@@ -14,6 +14,7 @@ from pathlib import Path
 from src.utils.utils import state_norm, UnpatchifyMetrics
 from src.utils.convert_2d_to_3d import TimmUniversalEncoder3d
 from src.model.my_smp.deeplabv3_model import DeepLabV3Plus
+from src.model.my_smp.unetpp import Unetpp
 
 
 logger = logging.getLogger(__name__)
@@ -392,6 +393,7 @@ class AortaModule(BaseModule):
         seg_arch_to_class = {
             'smp.Unet': smp.Unet,
             'DeepLabV3Plus': DeepLabV3Plus,
+            'Unetpp': Unetpp,
         }
         seg_class = seg_arch_to_class[seg_arch]
 
@@ -408,17 +410,29 @@ class AortaModule(BaseModule):
         image = batch['image']  # (B, 1, H, W, D)
         logits = self.model(image)  # (B, classes, H, W, D)
 
+        if not isinstance(logits, tuple):
+            logits = (logits,)
+
         if 'mask' not in batch:
             return None, None, logits
         
         mask = batch['mask']  # (B, H, W, D)
-        loss = torch.nn.functional.cross_entropy(
-            logits,
-            mask.long(),
-            reduction='none',
-        ).mean()  # TODO: fix non-deterministic behavior if reduction is applied
 
-        return loss, {'ce': loss}, logits
+        loss = None
+        for logits_inner in logits:
+            loss_inner = torch.nn.functional.cross_entropy(
+                logits_inner,
+                mask.long(),
+                reduction='none',
+            ).mean()  # TODO: fix non-deterministic behavior if reduction is applied
+
+            if loss is None:
+                loss = loss_inner
+            else:
+                loss += loss_inner
+        loss = loss / len(logits)
+
+        return loss, {'ce': loss}, logits[-1]
 
     def configure_metrics(self):
         """Configure task-specific metrics."""
