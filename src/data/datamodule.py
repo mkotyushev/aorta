@@ -37,8 +37,9 @@ class AortaDataModule(LightningDataModule):
 
         self.split_to_names = SPLIT_TO_NAMES
         if only_train:
-            self.split_to_names['train'] = self.split_to_names['train'] + self.split_to_names['valid'] + self.split_to_names['test']
-            self.split_to_names['valid'] = []
+            # Only test split is used, val is merged to train
+            self.split_to_names['train'] = self.split_to_names['train'] + self.split_to_names['valid']
+            self.split_to_names['valid'] = self.split_to_names['test']
             self.split_to_names['test'] = []
 
     def build_trainsforms(self) -> None:
