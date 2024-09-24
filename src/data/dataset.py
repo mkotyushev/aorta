@@ -89,7 +89,7 @@ def generate_patches_3d(
 def crop_by_positive(image, mask, margin=0, pad_size=None):
     assert image.ndim == 3
     assert mask.ndim == 3
-    assert image.shape == mask.shape
+    assert image.shape == mask.shape, f'{image.shape} != {mask.shape}'
 
     is_bg = (mask == 0)
 
