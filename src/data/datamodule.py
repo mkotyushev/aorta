@@ -1,5 +1,6 @@
 from lightning.pytorch import LightningDataModule
 from pathlib import Path
+from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader, RandomSampler
 from typing import Tuple
 from volumentations import RotatePseudo2D, GridDistortion
@@ -17,6 +18,7 @@ class AortaDataModule(LightningDataModule):
         num_samples: int = None,
         val_test_crop_inv_share: int = 10,
         only_train: bool = False,
+        fold_index: int = 0,
         debug: bool = False,
         batch_size: int = 4,
         num_workers: int = 0,
@@ -35,12 +37,22 @@ class AortaDataModule(LightningDataModule):
         self.val_transform = None
         self.test_transform = None
 
-        self.split_to_names = SPLIT_TO_NAMES
+        all_names = SPLIT_TO_NAMES['train'] + SPLIT_TO_NAMES['valid'] + SPLIT_TO_NAMES['test']
         if only_train:
-            # Only test split is used, val is merged to train
-            self.split_to_names['train'] = self.split_to_names['train'] + self.split_to_names['valid']
-            self.split_to_names['valid'] = self.split_to_names['test']
-            self.split_to_names['test'] = []
+            self.split_to_names = {
+                'train': all_names,
+                'valid': [],
+                'test': [],
+            }
+        else:
+            assert fold_index in range(5)
+            kfold = KFold(n_splits=5, shuffle=True, random_state=28490467)
+            indices = list(kfold.split(all_names))
+            self.split_to_names = {
+                'train': [all_names[i] for i in indices[fold_index][0]],
+                'valid': [all_names[i] for i in indices[fold_index][1]],
+                'test': [],
+            }
 
     def build_trainsforms(self) -> None:
         self.train_transform = Compose(
