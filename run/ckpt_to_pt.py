@@ -11,6 +11,7 @@ def parse_args():
 
 
 def main(args):
+    args.output_dirpath.mkdir(parents=True, exist_ok=True)
     for cpkt_filepath in args.cpkt_filepaths:
         output_filepath = args.output_dirpath / cpkt_filepath.with_suffix('.pt').name
         print(f'Converting {cpkt_filepath} to {output_filepath}')
