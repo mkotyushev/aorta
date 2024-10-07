@@ -1,6 +1,6 @@
 # Introduction
 
-This repository contains the training code for @mkotyushev's part of the LOWER MATH team solution for [AortaSeg24 Challenge](https://aortaseg24.grand-challenge.org/) (team's final test phase score is [TBA], securing [TBA] place). The @rostepifanov's part of the solution could be found in [TBA], and the common inference code could be found in [this](https://github.com/mkotyushev/aorta_submission/) repository.
+This repository contains the training code for @mkotyushev's part of the LOWER MATH team solution for [AortaSeg24 Challenge](https://aortaseg24.grand-challenge.org/) (team's final test phase score is [TBA], securing [TBA] place). The @rostepifanov's part of the solution could be found in [this](https://github.com/rostepifanov/aortaseg24solution) repository, and the common inference code could be found in [this](https://github.com/mkotyushev/aorta_submission/) repository.
 
 # Solution overview
 
